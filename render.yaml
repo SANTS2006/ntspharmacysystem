@@ -1,0 +1,44 @@
+# Render Blueprint: one web service (API + WebSockets + built React app), one worker (Celery + beat), one private Key Value (Redis).
+# Secrets are `sync: false`: Render asks for them in the dashboard on first deploy. Nothing secret lives in this file.
+services:
+  - type: web
+    name: ntspharmacy
+    runtime: python
+    plan: starter
+    buildCommand: ./build.sh
+    startCommand: cd backend && daphne -b 0.0.0.0 -p $PORT config.asgi:application
+    healthCheckPath: /health/live/
+    envVars: &common
+      - { key: PYTHON_VERSION, value: 3.13.5 }
+      - { key: NODE_VERSION, value: 22.12.0 }
+      - { key: DJANGO_DEBUG, value: "False" }
+      - { key: DJANGO_SECRET_KEY, generateValue: true }
+      - { key: PLATFORM_NAME, value: PharmaCloud }
+      - { key: PLATFORM_BASE_DOMAIN, sync: false }
+      - { key: DATABASE_URL, sync: false }          # Neon pooled URL
+      - { key: DIRECT_DATABASE_URL, sync: false }   # Neon direct URL (migrations)
+      - { key: REDIS_URL, fromService: { type: keyvalue, name: pharmacy-redis, property: connectionString } }
+      - { key: FIELD_ENCRYPTION_KEY, sync: false }
+      - { key: BACKUP_ENCRYPTION_KEY, sync: false }
+      - { key: BREVO_API_KEY, sync: false }
+      - { key: BREVO_SENDER_EMAIL, sync: false }
+      - { key: CLOUDINARY_CLOUD_NAME, sync: false }
+      - { key: CLOUDINARY_API_KEY, sync: false }
+      - { key: CLOUDINARY_API_SECRET, sync: false }
+      - { key: R2_ACCOUNT_ID, sync: false }
+      - { key: R2_ACCESS_KEY_ID, sync: false }
+      - { key: R2_SECRET_ACCESS_KEY, sync: false }
+      - { key: R2_BUCKET, sync: false }
+      - { key: PLATFORM_CONTACT_EMAIL, sync: false }
+  - type: worker
+    name: pharmacy-worker
+    runtime: python
+    plan: starter
+    buildCommand: cd backend && pip install -r requirements.txt
+    startCommand: cd backend && celery -A config worker -B -l info --concurrency 2   # single instance only: -B embeds the scheduler
+    envVars: *common
+keyvalue:
+  - name: pharmacy-redis
+    plan: starter
+    maxmemoryPolicy: noeviction   # cache holds throttling/maintenance flags and the Celery queue
+    ipAllowList: []               # internal network only
