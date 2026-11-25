@@ -13,3 +13,16 @@ class TenantAwareJWTAuthentication(JWTAuthentication):
         if user.tenant_id and not user.tenant.is_active_tenant:
             raise AuthenticationFailed("This pharmacy account is not active.", code="tenant_inactive")
         return user
+
+
+try:  # API docs: describe this authenticator as a bearer JWT (also silences drf-spectacular's "could not resolve authenticator" warnings)
+    from drf_spectacular.extensions import OpenApiAuthenticationExtension
+
+    class TenantAwareJWTScheme(OpenApiAuthenticationExtension):
+        target_class = "apps.accounts.authentication.TenantAwareJWTAuthentication"
+        name = "bearerAuth"
+
+        def get_security_definition(self, auto_schema):
+            return {"type": "http", "scheme": "bearer", "bearerFormat": "JWT"}
+except ImportError:  # pragma: no cover
+    pass

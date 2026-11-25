@@ -234,7 +234,9 @@ LOGGING = {"version": 1, "disable_existing_loggers": False,
            "root": {"handlers": ["console"], "level": env("LOG_LEVEL", default="INFO")}}
 
 # Email uniqueness is per-tenant via UniqueConstraint (see accounts.User.Meta), not globally.
-SILENCED_SYSTEM_CHECKS = ["auth.E003"]
+# drf_spectacular.W001/W002 only describe incomplete OpenAPI docs for plain APIViews (no serializer classes); they are not runtime or security problems
+# and made every `check` / deploy log 400+ lines long. The schema is still generated at /api/schema/.
+SILENCED_SYSTEM_CHECKS = ["auth.E003", "drf_spectacular.W001", "drf_spectacular.W002"]
 
 from celery.schedules import crontab  # noqa: E402
 
