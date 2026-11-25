@@ -93,7 +93,8 @@ def start_payment(order_id, *, user) -> PaymentAttempt:
         return live
     tenant = get_current_tenant()
     attempt = PaymentAttempt.objects.create(order=order, reference=next_number("PAY"), amount=order.total, currency=currency(), created_by=user)
-    base = f"{settings.FRONTEND_URL.rstrip('/')}/pharmacy/{tenant.slug}/orders/{order.pk}"
+    from apps.core.links import site_url
+    base = site_url(tenant.slug, f"/orders/{order.pk}")
     session = monime.create_checkout_session(cfg, reference=attempt.reference, name=f"Order {order.reference_number}", amount_minor=to_minor(order.total),
                                              currency=attempt.currency, success_url=f"{base}?payment=return", cancel_url=f"{base}?payment=cancelled")
     attempt.provider_session_id = str(session.get("id", ""))[:100] or None

@@ -8,3 +8,9 @@ html { scroll-behavior: smooth; }
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } * { animation: none !important; transition: none !important; } }
 * { scrollbar-width: thin; scrollbar-color: var(--brand) transparent; }
 ::-webkit-scrollbar { width: 10px; } ::-webkit-scrollbar-thumb { background: var(--brand); border-radius: 8px; }
+
+/* Browser autofill paints a pale overlay that hid the typed text: keep a white field with dark, readable text. */
+input:-webkit-autofill, input:-webkit-autofill:hover, input:-webkit-autofill:focus, textarea:-webkit-autofill, select:-webkit-autofill {
+  -webkit-text-fill-color: #0f172a !important; caret-color: #0f172a; -webkit-box-shadow: 0 0 0 1000px #ffffff inset !important; box-shadow: 0 0 0 1000px #ffffff inset !important; transition: background-color 9999s ease-out 0s;
+}
+input:autofill { color: #0f172a !important; background-color: #ffffff !important; }

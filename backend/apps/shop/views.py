@@ -443,7 +443,8 @@ class BranchQrView(TenantContextMixin, APIView):
         qs = Branch.objects.filter(pk__in=ids) if ids else Branch.objects.all()
         b = get_object_or_404(qs, pk=pk)
         token = services.ensure_qr_token(b)
-        url = f"{settings.FRONTEND_URL.rstrip('/')}/pharmacy/{request.tenant.slug}/menu/{token}"
+        from apps.core.links import site_url
+        url = site_url(request.tenant.slug, f"/menu/{token}")
         if request.query_params.get("format") == "json":
             return Response({"url": url})
         buf = BytesIO()

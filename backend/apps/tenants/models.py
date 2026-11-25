@@ -3,7 +3,7 @@ from django.db import models
 
 from apps.core.models import TenantOwnedModel, TimeStampedModel
 
-RESERVED_SLUGS = {"www", "api", "app", "admin", "platform", "static", "media", "pharmacy", "login", "support", "mail"}
+RESERVED_SLUGS = {"www", "api", "app", "admin", "platform", "static", "media", "pharmacy", "login", "support", "mail", "ftp", "smtp", "dashboard", "help", "docs", "blog", "ntspharmacy"}
 def validate_logo(f):
     from django.core.exceptions import ValidationError
     from django.conf import settings

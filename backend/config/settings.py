@@ -17,11 +17,15 @@ if RENDER_EXTERNAL_HOSTNAME and RENDER_EXTERNAL_HOSTNAME not in ALLOWED_HOSTS:
 
 PLATFORM_NAME = env("PLATFORM_NAME", default="PharmaCloud")
 PLATFORM_BASE_DOMAIN = env("PLATFORM_BASE_DOMAIN", default="localhost")
+TENANT_SUBDOMAINS = env.bool("TENANT_SUBDOMAINS", default=False)  # <slug>.<PLATFORM_BASE_DOMAIN>; requires wildcard DNS + wildcard TLS on a custom domain
 FRONTEND_URL = env("FRONTEND_URL", default=env("RENDER_EXTERNAL_URL", default="http://localhost:5173"))  # same origin as the API when served by Django
 
 if not DEBUG and ("localhost" in FRONTEND_URL or "127.0.0.1" in FRONTEND_URL):
     from django.core.exceptions import ImproperlyConfigured
     raise ImproperlyConfigured("FRONTEND_URL must be the public https URL in production: every emailed link is built from it.")
+
+if TENANT_SUBDOMAINS:
+    ALLOWED_HOSTS.append("." + PLATFORM_BASE_DOMAIN)  # every pharmacy subdomain
 
 INSTALLED_APPS = [
     "daphne",
@@ -165,7 +169,7 @@ SPECTACULAR_SETTINGS = {"TITLE": f"{PLATFORM_NAME} API", "VERSION": "1.0.0", "SE
 # --- Security ---
 CORS_ALLOWED_ORIGINS = env.list("CORS_ALLOWED_ORIGINS", default=[FRONTEND_URL])
 CORS_ALLOW_HEADERS = ["accept", "authorization", "content-type", "x-tenant-slug", "idempotency-key"]
-CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS", default=[FRONTEND_URL])
+CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS", default=[FRONTEND_URL]) + ([f"https://*.{PLATFORM_BASE_DOMAIN}"] if TENANT_SUBDOMAINS else [])
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = "Lax"
 CSRF_COOKIE_SAMESITE = "Lax"

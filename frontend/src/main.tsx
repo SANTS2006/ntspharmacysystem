@@ -5,6 +5,9 @@ import { BrowserRouter } from "react-router-dom";
 import App from "./App";
 import { AuthProvider } from "./lib/auth";
 import "./index.css";
+import { rewriteForSubdomain } from "./lib/subdomain";
+
+rewriteForSubdomain();
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: 1, staleTime: 30_000 } } });
 createRoot(document.getElementById("root")!).render(

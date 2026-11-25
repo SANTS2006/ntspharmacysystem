@@ -7,6 +7,7 @@ from rest_framework.response import Response
 
 from apps.audit import services as audit
 from apps.core.views import TenantContextMixin
+from apps.core.links import site_url
 from apps.notifications.services import render_branded_html, send_email
 from apps.tenants.models import Branch
 
@@ -101,7 +102,7 @@ class StaffListCreateView(TenantContextMixin, StaffScopedMixin, ListCreateAPIVie
         d, actor, tenant = dict(serializer.validated_data), self.request.user, self.request.tenant
         invite = d.pop("use_invitation", True)
         user = User.objects.create_user(tenant=tenant, created_by=actor, password=None, **d)
-        urls = f"{settings.FRONTEND_URL.rstrip('/')}/pharmacy/{tenant.slug}/admin/login"
+        urls = site_url(tenant.slug, "/admin/login")
         if invite:
             user.set_unusable_password()
             user.must_change_password = True

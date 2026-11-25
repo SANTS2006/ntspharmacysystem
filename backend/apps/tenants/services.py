@@ -12,8 +12,8 @@ from .models import Branch, Pharmacy
 
 
 def pharmacy_urls(pharmacy: Pharmacy) -> dict:
-    base = settings.FRONTEND_URL.rstrip("/")
-    return {"website": f"{base}/pharmacy/{pharmacy.slug}", "admin_login": f"{base}/pharmacy/{pharmacy.slug}/admin/login"}
+    from apps.core.links import site_url
+    return {"website": site_url(pharmacy.slug), "admin_login": site_url(pharmacy.slug, "/admin/login")}
 
 
 @transaction.atomic
