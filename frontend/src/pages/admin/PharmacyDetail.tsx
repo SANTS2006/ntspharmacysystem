@@ -82,7 +82,7 @@ export default function PharmacyDetail() {
       <section className="grid gap-4 md:grid-cols-2">
         <div className="rounded-xl bg-white p-4 shadow-sm"><h2 className="mb-2 font-semibold">Details</h2>
           <dl className="grid grid-cols-2 gap-1 text-sm">
-            <dt>Website</dt><dd>/pharmacy/{ph.slug}</dd><dt>License</dt><dd>{ph.license_number || "—"}</dd>
+            <dt>Website</dt><dd>/{ph.slug}</dd><dt>License</dt><dd>{ph.license_number || "—"}</dd>
             <dt>Registration</dt><dd>{ph.registration_number || "—"}</dd><dt>Contact</dt><dd>{ph.contact_email || "—"}</dd>
             <dt>Users</dt><dd>{o.data?.user_count ?? "…"}</dd>
             <dt>Subscription</dt><dd>{o.data?.subscription ? `${o.data.subscription.plan} (${o.data.subscription.status})` : "None"}</dd>

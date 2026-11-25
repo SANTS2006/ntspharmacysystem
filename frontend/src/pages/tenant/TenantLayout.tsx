@@ -19,7 +19,7 @@ export default function TenantLayout() {
   }, [brand.data]);
   useRealtime(!!user && !user.is_platform_admin && user.tenant_slug === slug);
   if (loading) return <p className="p-8">Loading…</p>;
-  if (!user || user.is_platform_admin || user.tenant_slug !== slug) return <Navigate to={`/pharmacy/${slug}/admin/login`} replace />;
+  if (!user || user.is_platform_admin || user.tenant_slug !== slug) return <Navigate to={`/${slug}/admin/login`} replace />;
   if (user.must_change_password) return <Navigate to="/change-password" replace state={{ slug }} />;
   const can = (p: string) => user.permissions.includes(p); // UI hint only; the API enforces permissions
   const items = [
@@ -50,7 +50,7 @@ export default function TenantLayout() {
         <p className="mb-4 text-lg font-bold">{brand.data?.name ?? "Pharmacy"}</p>
         <nav aria-label="Pharmacy" className="flex gap-2 md:flex-col">
           {items.map(({ to, label, icon: Icon }) => (
-            <NavLink key={to} to={`/pharmacy/${slug}/admin/${to}`} className={({ isActive }) => `flex items-center gap-2 rounded px-3 py-2 text-sm ${isActive ? "bg-black/25" : "hover:bg-black/15"}`}>
+            <NavLink key={to} to={`/${slug}/admin/${to}`} className={({ isActive }) => `flex items-center gap-2 rounded px-3 py-2 text-sm ${isActive ? "bg-black/25" : "hover:bg-black/15"}`}>
               <Icon size={16} aria-hidden /> {label}
             </NavLink>
           ))}

@@ -25,7 +25,7 @@ export function ServicesPage() {
       <ul className="grid gap-3 sm:grid-cols-2">{svcs.data?.map((s) => <li key={s.id} className="rounded-xl border p-4">{s.image && <img src={s.image} alt="" className="mb-2 h-24 w-full rounded object-cover" />}<h2 className="font-semibold">{s.name}</h2><p className="text-sm text-slate-600">{s.description}</p><p className="text-sm">{s.price ? `From ${s.price}` : "Ask us for the price"} · {s.duration_minutes} min {s.requires_booking && "· booking required"}</p></li>)}</ul>
       {svcs.data?.length === 0 && <p className="text-slate-500">No services are listed yet.</p>}
       <h2 className="text-xl font-semibold">Book an appointment</h2>
-      {!verified ? <p>Please <Link className="underline" to={`/pharmacy/${slug}/login`}>sign in</Link> with a verified account to book.</p> : (
+      {!verified ? <p>Please <Link className="underline" to={`/${slug}/login`}>sign in</Link> with a verified account to book.</p> : (
         <form onSubmit={book} className="space-y-2 rounded-xl border p-4"><Msg m={m} />
           <label className="block text-sm font-medium">Service<select required className={inputCls} value={f.service} onChange={(e) => setF({ ...f, service: e.target.value })}><option value="">Select a service</option>{svcs.data?.filter((s) => s.requires_booking).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
           <label className="block text-sm font-medium">Branch<select required className={inputCls} value={f.branch} onChange={(e) => setF({ ...f, branch: e.target.value })}><option value="">Select a branch</option>{branches.data?.filter((b) => !f.service || !svcs.data?.find((s) => s.id === Number(f.service))?.branches.length || svcs.data?.find((s) => s.id === Number(f.service))?.branches.includes(b.id)).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select></label>
@@ -58,7 +58,7 @@ export function FeedbackPage() {
   const [m, setM] = useState<{ ok: boolean; t: string } | null>(null); const [f, setF] = useState({ rating: "5", comment: "", kind: "feedback", message: "" });
   const sendFeedback = async (e: React.FormEvent) => { e.preventDefault(); try { await api("/shop/feedback/", { method: "POST", tenant: slug, body: { rating: Number(f.rating), comment: f.comment } }); setM({ ok: true, t: "Thank you for your feedback." }); } catch (e2) { setM({ ok: false, t: errText(e2) }); } };
   const sendInquiry = async (e: React.FormEvent) => { e.preventDefault(); try { await api("/shop/inquiries/", { method: "POST", tenant: slug, body: { kind: f.kind, message: f.message } }); setM({ ok: true, t: "Sent. We will reply by email." }); } catch (e2) { setM({ ok: false, t: errText(e2) }); } };
-  if (!(user?.role === "customer" && user.email_verified)) return <p>Please <Link className="underline" to={`/pharmacy/${slug}/login`}>sign in</Link> with a verified account.</p>;
+  if (!(user?.role === "customer" && user.email_verified)) return <p>Please <Link className="underline" to={`/${slug}/login`}>sign in</Link> with a verified account.</p>;
   return (
     <div className="mx-auto max-w-xl space-y-6"><Msg m={m} />
       <form onSubmit={sendFeedback} className="space-y-2 rounded-xl border p-4"><h1 className="text-xl font-semibold">Leave feedback</h1>

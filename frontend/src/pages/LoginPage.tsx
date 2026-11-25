@@ -1,9 +1,10 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import { LogIn } from "lucide-react";
+import { Lock, LogIn, Mail } from "lucide-react";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
-import { useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { z } from "zod";
+import { AuthShell, Field, Notice, SubmitButton } from "../components/auth/AuthUi";
 import { ApiError, login } from "../lib/api";
 import { useAuth } from "../lib/auth";
 
@@ -13,7 +14,7 @@ const schema = z.object({
 });
 type Form = z.infer<typeof schema>;
 
-/** Used for the platform login (/platform/login) and pharmacy login (/pharmacy/:slug/admin/login). */
+/** Used for the platform login (/platform/login) and pharmacy staff login (/:slug/admin/login). */
 export default function LoginPage() {
   const { slug } = useParams();
   const nav = useNavigate();
@@ -25,26 +26,20 @@ export default function LoginPage() {
     try {
       const user = await login(v.email, v.password, slug);
       setUser(user);
-      nav(user.must_change_password ? "/change-password" : user.is_platform_admin ? "/platform/dashboard" : user.tenant_slug ? `/pharmacy/${user.tenant_slug}/admin/dashboard` : "/dashboard", { state: { slug } });
+      nav(user.must_change_password ? "/change-password" : user.is_platform_admin ? "/platform/dashboard" : user.tenant_slug ? `/${user.tenant_slug}/admin/dashboard` : "/dashboard", { state: { slug } });
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Something went wrong. Try again.");
     }
   };
   return (
-    <main className="min-h-screen grid place-items-center bg-slate-50 p-4">
-      <form onSubmit={handleSubmit(onSubmit)} noValidate className="w-full max-w-md space-y-4 rounded-2xl bg-white p-8 shadow">
-        <h1 className="flex items-center gap-2 text-2xl font-semibold"><LogIn aria-hidden /> {slug ? "Pharmacy sign in" : "Platform sign in"}</h1>
-        {error && <p role="alert" className="rounded bg-red-50 p-3 text-sm text-red-700">{error}</p>}
-        <label className="block text-sm font-medium">Email <span aria-hidden className="text-red-600">*</span>
-          <input type="email" autoComplete="username" placeholder="Enter your email address" className="mt-1 w-full rounded border p-2" aria-invalid={!!errors.email} {...register("email")} />
-          {errors.email && <span role="alert" className="text-xs text-red-600">{errors.email.message}</span>}
-        </label>
-        <label className="block text-sm font-medium">Password <span aria-hidden className="text-red-600">*</span>
-          <input type="password" autoComplete="current-password" placeholder="Enter your password" className="mt-1 w-full rounded border p-2" aria-invalid={!!errors.password} {...register("password")} />
-          {errors.password && <span role="alert" className="text-xs text-red-600">{errors.password.message}</span>}
-        </label>
-        <button disabled={isSubmitting} className="w-full rounded bg-teal-700 p-2 font-medium text-white disabled:opacity-60">{isSubmitting ? "Signing in…" : "Sign in"}</button>
+    <AuthShell icon={LogIn} title={slug ? "Pharmacy sign in" : "Platform sign in"} subtitle={slug ? "Welcome back. Sign in to manage your pharmacy." : "Sign in to the platform administration."}
+      footer={<Link className="font-medium text-[var(--brand)] hover:underline" to={slug ? `/${slug}/admin/forgot-password` : "/platform/forgot-password"}>Forgot your password?</Link>}>
+      <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-4">
+        <Notice message={error} />
+        <Field label="Email" icon={Mail} type="email" autoComplete="username" placeholder="you@example.com" error={errors.email?.message} {...register("email")} />
+        <Field label="Password" icon={Lock} type="password" autoComplete="current-password" placeholder="Enter your password" error={errors.password?.message} {...register("password")} />
+        <SubmitButton busy={isSubmitting} icon={LogIn}>{isSubmitting ? "Signing in…" : "Sign in"}</SubmitButton>
       </form>
-    </main>
+    </AuthShell>
   );
 }

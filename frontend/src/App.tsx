@@ -58,9 +58,9 @@ export default function App() {
         <Route path="/legal/:doc" element={<Legal />} />
         <Route path="/platform/login" element={<LoginPage />} />
         <Route path="/platform/forgot-password" element={<ForgotPassword />} />
-        <Route path="/pharmacy/:slug/admin/login" element={<LoginPage />} />
-        <Route path="/pharmacy/:slug/admin/forgot-password" element={<TenantForgot />} />
-        <Route path="/pharmacy/:slug/admin" element={<TenantLayout />}>
+        <Route path="/:slug/admin/login" element={<LoginPage />} />
+        <Route path="/:slug/admin/forgot-password" element={<TenantForgot />} />
+        <Route path="/:slug/admin" element={<TenantLayout />}>
           <Route path="dashboard" element={<TenantDashboard />} />
           <Route path="branches" element={<Branches />} />
           <Route path="staff" element={<StaffPage />} />
@@ -82,7 +82,7 @@ export default function App() {
           <Route path="deliveries" element={<DeliveriesPage />} />
           <Route path="settings" element={<SettingsPage />} />
         </Route>
-        <Route path="/pharmacy/:slug" element={<SiteLayout />}>
+        <Route path="/:slug" element={<SiteLayout />}>
           <Route index element={<SiteHome />} />
           <Route path="products" element={<Products />} />
           <Route path="register" element={<CustomerRegister />} />

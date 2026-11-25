@@ -110,7 +110,7 @@ export default function Pharmacies() {
             <tbody>{data.results.map((p) => (
               <tr key={p.id} className="border-t">
                 <td className="p-3"><Link className="font-medium text-teal-800 underline" to={`/platform/pharmacies/${p.id}`}>{p.name}</Link></td>
-                <td>/pharmacy/{p.slug}</td><td>{[p.city, p.country].filter(Boolean).join(", ")}</td>
+                <td>/{p.slug}</td><td>{[p.city, p.country].filter(Boolean).join(", ")}</td>
                 <td><span className={`rounded px-2 py-0.5 text-xs ${p.status === "active" ? "bg-green-100 text-green-800" : "bg-amber-100 text-amber-800"}`}>{p.status}</span></td>
               </tr>))}</tbody>
           </table>

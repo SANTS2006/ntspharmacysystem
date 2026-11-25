@@ -2,6 +2,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { ApiError, api, fetchMe, login, openProtectedFile } from "../../lib/api";
+import { LogIn, Lock, Mail, MailCheck, Phone, ShieldCheck, User, UserPlus } from "lucide-react";
+import { AuthShell, Field, Notice, PasswordRules, SubmitButton } from "../../components/auth/AuthUi";
 import { useAuth } from "../../lib/auth";
 import { useCart } from "../../lib/cart";
 import { useSite } from "./SiteLayout";
@@ -21,7 +23,7 @@ export function SiteHome() {
   return (
     <div className="space-y-6">
       <h1 className="text-3xl font-bold">{s?.name}</h1><p className="max-w-2xl text-slate-600">{s?.description || "Your trusted local pharmacy."}</p>
-      <Link to={`/pharmacy/${slug}/products`} className="inline-block rounded px-5 py-2 text-white" style={brand}>Browse products</Link>
+      <Link to={`/${slug}/products`} className="inline-block rounded px-5 py-2 text-white" style={brand}>Browse products</Link>
       <section><h2 className="mb-2 text-xl font-semibold">Our branches</h2><ul className="grid gap-3 sm:grid-cols-2">{branches.data?.map((b) => <li key={b.id} className="rounded-xl border p-4"><strong>{b.name}</strong><br />{b.address}<br />{b.phone}</li>)}</ul></section>
     </div>
   );
@@ -57,45 +59,56 @@ export function CustomerRegister() {
     e.preventDefault(); setErr(null);
     if (!terms) { setErr("You must agree to the Terms of Use and Privacy Policy."); return; }
     setBusy(true);
-    try { const r = await api<{ tokens: { access: string; refresh: string }; user: never }>("/shop/register/", { method: "POST", body: { ...f, terms_accepted: true }, tenant: slug, retry: false }); const { setTokens } = await import("../../lib/api"); setTokens(r.tokens); setUser(await fetchMe(slug)); nav(`/pharmacy/${slug}/verify`); }
+    try { const r = await api<{ tokens: { access: string; refresh: string }; user: never }>("/shop/register/", { method: "POST", body: { ...f, terms_accepted: true }, tenant: slug, retry: false }); const { setTokens } = await import("../../lib/api"); setTokens(r.tokens); setUser(await fetchMe(slug)); nav(`/${slug}/verify`); }
     catch (e2) { setErr(errText(e2)); } finally { setBusy(false); }
   };
-  const field = (k: keyof typeof f, label: string, ph: string, type = "text", req = true) => <label className="block text-sm font-medium">{label}{req && <span aria-hidden className="text-red-600"> *</span>}<input type={type} required={req} minLength={k === "password" ? 10 : undefined} autoComplete={k === "password" ? "new-password" : undefined} className={inputCls} placeholder={ph} value={f[k]} onChange={(e) => setF({ ...f, [k]: e.target.value })} /></label>;
+  const set = (k: keyof typeof f) => ({ value: f[k], onChange: (e: React.ChangeEvent<HTMLInputElement>) => setF({ ...f, [k]: e.target.value }) });
   return (
-    <form onSubmit={submit} className="mx-auto max-w-md space-y-3 rounded-xl border p-6"><h1 className="text-2xl font-semibold">Create your account</h1><Alert m={err} />
-      {field("full_name", "Full name", "Enter your full name")}{field("email", "Email", "Enter your email address", "email")}{field("phone", "Phone number", "Enter your phone number", "tel", false)}{field("password", "Password", "Enter a password of at least 10 characters", "password")}
-      <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={terms} onChange={(e) => setTerms(e.target.checked)} /> I agree to the Terms of Use and Privacy Policy</label>
-      <button disabled={busy} className="w-full rounded p-2 text-white disabled:opacity-60" style={brand}>{busy ? "Creating…" : "Register"}</button>
-      <p className="text-sm">Already registered? <Link className="underline" to={`/pharmacy/${slug}/login`}>Sign in</Link></p>
-    </form>
+    <AuthShell embedded icon={UserPlus} title="Create your account" subtitle="Order medicines online and track your orders."
+      footer={<>Already registered? <Link className="font-medium text-[var(--brand)] hover:underline" to={`/${slug}/login`}>Sign in</Link></>}>
+      <form onSubmit={submit} className="space-y-4"><Notice message={err} />
+        <Field label="Full name" icon={User} placeholder="Enter your full name" autoComplete="name" {...set("full_name")} />
+        <Field label="Email" icon={Mail} type="email" placeholder="you@example.com" autoComplete="email" {...set("email")} />
+        <Field label="Phone number" icon={Phone} type="tel" required={false} placeholder="Enter your phone number" autoComplete="tel" {...set("phone")} />
+        <Field label="Password" icon={Lock} type="password" minLength={10} placeholder="At least 10 characters" autoComplete="new-password" {...set("password")} />
+        <PasswordRules value={f.password} />
+        <label className="flex items-start gap-2 text-sm text-slate-600"><input type="checkbox" className="mt-0.5 h-4 w-4 rounded border-slate-300" checked={terms} onChange={(e) => setTerms(e.target.checked)} /> I agree to the Terms of Use and Privacy Policy</label>
+        <SubmitButton busy={busy} icon={UserPlus}>{busy ? "Creating…" : "Create account"}</SubmitButton>
+      </form>
+    </AuthShell>
   );
 }
 
 export function CustomerLogin() {
   const { slug = "" } = useParams(); const nav = useNavigate(); const { setUser } = useAuth();
-  const [f, setF] = useState({ email: "", password: "" }); const [err, setErr] = useState<string | null>(null);
-  const submit = async (e: React.FormEvent) => { e.preventDefault(); setErr(null); try { const u = await login(f.email, f.password, slug); setUser(u); nav(u.email_verified ? `/pharmacy/${slug}/orders` : `/pharmacy/${slug}/verify`); } catch (e2) { setErr(errText(e2)); } };
+  const [f, setF] = useState({ email: "", password: "" }); const [err, setErr] = useState<string | null>(null); const [busy, setBusy] = useState(false);
+  const submit = async (e: React.FormEvent) => { e.preventDefault(); setErr(null); setBusy(true); try { const u = await login(f.email, f.password, slug); setUser(u); nav(u.email_verified ? `/${slug}/orders` : `/${slug}/verify`); } catch (e2) { setErr(errText(e2)); } finally { setBusy(false); } };
   return (
-    <form onSubmit={submit} className="mx-auto max-w-md space-y-3 rounded-xl border p-6"><h1 className="text-2xl font-semibold">Sign in</h1><Alert m={err} />
-      <label className="block text-sm font-medium">Email<input type="email" required className={inputCls} placeholder="Enter your email address" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} autoComplete="username" /></label>
-      <label className="block text-sm font-medium">Password<input type="password" required className={inputCls} placeholder="Enter your password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} autoComplete="current-password" /></label>
-      <button className="w-full rounded p-2 text-white" style={brand}>Sign in</button>
-      <p className="text-sm"><Link className="underline" to={`/pharmacy/${slug}/admin/forgot-password`}>Forgot your password?</Link> · <Link className="underline" to={`/pharmacy/${slug}/register`}>Create an account</Link></p>
-    </form>
+    <AuthShell embedded icon={LogIn} title="Welcome back" subtitle="Sign in to place and track your orders."
+      footer={<><Link className="font-medium text-[var(--brand)] hover:underline" to={`/${slug}/admin/forgot-password`}>Forgot your password?</Link> · <Link className="font-medium text-[var(--brand)] hover:underline" to={`/${slug}/register`}>Create an account</Link></>}>
+      <form onSubmit={submit} className="space-y-4"><Notice message={err} />
+        <Field label="Email" icon={Mail} type="email" placeholder="you@example.com" autoComplete="username" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} />
+        <Field label="Password" icon={Lock} type="password" placeholder="Enter your password" autoComplete="current-password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} />
+        <SubmitButton busy={busy} icon={LogIn}>{busy ? "Signing in…" : "Sign in"}</SubmitButton>
+      </form>
+    </AuthShell>
   );
 }
 
 export function VerifyEmail() {
   const { slug = "" } = useParams(); const nav = useNavigate(); const { user, setUser } = useAuth();
   const [code, setCode] = useState(""); const [msg, setMsg] = useState<{ ok: boolean; t: string } | null>(null);
-  if (!user) return <p>Please <Link className="underline" to={`/pharmacy/${slug}/login`}>sign in</Link> first.</p>;
-  const verify = async (e: React.FormEvent) => { e.preventDefault(); try { await api("/shop/verify-email/", { method: "POST", body: { code: code.trim().toUpperCase() }, tenant: slug }); setUser(await fetchMe(slug)); nav(`/pharmacy/${slug}/products`); } catch (e2) { setMsg({ ok: false, t: errText(e2) }); } };
+  if (!user) return <p>Please <Link className="underline" to={`/${slug}/login`}>sign in</Link> first.</p>;
+  const verify = async (e: React.FormEvent) => { e.preventDefault(); try { await api("/shop/verify-email/", { method: "POST", body: { code: code.trim().toUpperCase() }, tenant: slug }); setUser(await fetchMe(slug)); nav(`/${slug}/products`); } catch (e2) { setMsg({ ok: false, t: errText(e2) }); } };
   const resend = () => api("/shop/resend-code/", { method: "POST", tenant: slug }).then(() => setMsg({ ok: true, t: "A new code has been sent." })).catch((e) => setMsg({ ok: false, t: errText(e) }));
   return (
-    <form onSubmit={verify} className="mx-auto max-w-md space-y-3 rounded-xl border p-6"><h1 className="text-2xl font-semibold">Verify your email</h1><p className="text-sm">Enter the 6-character code we sent to {user.email}.</p><Alert m={msg?.t ?? null} ok={msg?.ok} />
-      <input aria-label="Verification code" required maxLength={6} minLength={6} autoComplete="one-time-code" className="w-full rounded border p-2 text-center text-2xl tracking-widest" placeholder="Enter the code" value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} />
-      <button className="w-full rounded p-2 text-white" style={brand}>Verify</button><button type="button" onClick={resend} className="text-sm underline">Send a new code</button>
-    </form>
+    <AuthShell embedded icon={MailCheck} title="Verify your email" subtitle={`Enter the 6-character code we sent to ${user.email}.`}
+      footer={<button type="button" onClick={resend} className="font-medium text-[var(--brand)] hover:underline">Send a new code</button>}>
+      <form onSubmit={verify} className="space-y-4"><Notice message={msg?.t ?? null} ok={msg?.ok} />
+        <input aria-label="Verification code" required maxLength={6} minLength={6} autoComplete="one-time-code" className="w-full rounded-xl border border-slate-300 bg-white py-3 text-center text-3xl font-bold uppercase tracking-[0.5em] text-slate-900 shadow-sm outline-none focus:border-[var(--brand)] focus:ring-4 focus:ring-blue-100" placeholder="······" value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} />
+        <SubmitButton icon={ShieldCheck}>Verify email</SubmitButton>
+      </form>
+    </AuthShell>
   );
 }
 
@@ -107,16 +120,16 @@ export function Checkout() {
   const idem = useRef(crypto.randomUUID());
   const place = useMutation({
     mutationFn: () => api<{ id: number }>("/shop/orders/", { method: "POST", headers: { "Idempotency-Key": idem.current }, tenant: slug, body: { branch: Number(f.branch), fulfilment: f.fulfilment, payment_method: f.online ? "monime" : f.fulfilment === "pickup" ? "cash_on_pickup" : "cash_on_delivery", delivery_address: f.address, notes: f.notes, items: cart.items.map((i) => ({ medicine: i.id, quantity: i.quantity })) } }),
-    onSuccess: (o) => { cart.clear(); idem.current = crypto.randomUUID(); nav(`/pharmacy/${slug}/orders/${o.id}`); }, onError: (e) => setErr(errText(e)),
+    onSuccess: (o) => { cart.clear(); idem.current = crypto.randomUUID(); nav(`/${slug}/orders/${o.id}`); }, onError: (e) => setErr(errText(e)),
   });
   const estimate = cart.items.reduce((t, i) => t + Number(i.price) * i.quantity, 0);
-  if (cart.items.length === 0) return <div><h1 className="text-2xl font-semibold">Your cart</h1><p>Your cart is empty. <Link className="underline" to={`/pharmacy/${slug}/products`}>Browse products</Link></p></div>;
+  if (cart.items.length === 0) return <div><h1 className="text-2xl font-semibold">Your cart</h1><p>Your cart is empty. <Link className="underline" to={`/${slug}/products`}>Browse products</Link></p></div>;
   return (
     <div className="space-y-4"><h1 className="text-2xl font-semibold">Checkout</h1>
       <ul className="divide-y rounded-xl border">{cart.items.map((i) => <li key={i.id} className="flex items-center gap-3 p-3 text-sm"><span className="flex-1">{i.name} {i.requires_prescription && <em className="text-red-700">(prescription required)</em>}</span>
         <input aria-label={`Quantity of ${i.name}`} type="number" min={1} max={100} className="w-16 rounded border p-1" value={i.quantity} onChange={(e) => cart.setQty(i.id, Number(e.target.value))} /><span>{(Number(i.price) * i.quantity).toFixed(2)}</span><button className="underline" onClick={() => cart.remove(i.id)}>Remove</button></li>)}</ul>
       <p className="text-sm text-slate-600">Estimated subtotal {estimate.toFixed(2)}. The final price including tax and any delivery fee is calculated by the pharmacy when you place the order.</p>
-      {!user || user.role !== "customer" ? <p>Please <Link className="underline" to={`/pharmacy/${slug}/login`}>sign in</Link> or <Link className="underline" to={`/pharmacy/${slug}/register`}>register</Link> to place an order.</p> : !user.email_verified ? <p>Please <Link className="underline" to={`/pharmacy/${slug}/verify`}>verify your email</Link> to place an order.</p> : (
+      {!user || user.role !== "customer" ? <p>Please <Link className="underline" to={`/${slug}/login`}>sign in</Link> or <Link className="underline" to={`/${slug}/register`}>register</Link> to place an order.</p> : !user.email_verified ? <p>Please <Link className="underline" to={`/${slug}/verify`}>verify your email</Link> to place an order.</p> : (
         <form onSubmit={(e) => { e.preventDefault(); setErr(null); place.mutate(); }} className="space-y-3 rounded-xl border p-4"><Alert m={err} />
           <label className="block text-sm font-medium">Branch<select required className={inputCls} value={f.branch} onChange={(e) => setF({ ...f, branch: e.target.value })}><option value="">Select a branch</option>{branches.data?.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select></label>
           <fieldset className="text-sm"><legend className="font-medium">Fulfilment</legend><label className="mr-4"><input type="radio" checked={f.fulfilment === "pickup"} onChange={() => setF({ ...f, fulfilment: "pickup" })} /> Pickup (pay at the pharmacy)</label><label><input type="radio" checked={f.fulfilment === "delivery"} onChange={() => setF({ ...f, fulfilment: "delivery" })} /> Delivery (pay on delivery)</label></fieldset>
@@ -134,7 +147,7 @@ export function Orders() {
   const { slug = "" } = useParams();
   const list = useQuery({ queryKey: ["my-orders"], queryFn: () => api<Page<OrderRow>>("/shop/orders/", { tenant: slug }) });
   return <div className="space-y-3"><h1 className="text-2xl font-semibold">My orders</h1>{list.data?.results.length === 0 && <p>No orders yet.</p>}
-    <ul className="space-y-2">{list.data?.results.map((o) => <li key={o.id} className="flex justify-between rounded-xl border p-3"><Link className="font-medium underline" to={`/pharmacy/${slug}/orders/${o.id}`}>{o.reference_number}</Link><span>{o.status.replace(/_/g, " ")}</span><span>{o.total}</span></li>)}</ul></div>;
+    <ul className="space-y-2">{list.data?.results.map((o) => <li key={o.id} className="flex justify-between rounded-xl border p-3"><Link className="font-medium underline" to={`/${slug}/orders/${o.id}`}>{o.reference_number}</Link><span>{o.status.replace(/_/g, " ")}</span><span>{o.total}</span></li>)}</ul></div>;
 }
 
 export function OrderDetail() {

@@ -32,12 +32,12 @@ export default function SiteLayout() {
       <a href="#content" className="sr-only focus:not-sr-only">Skip to content</a>
       <header className="text-white" style={{ background: "var(--brand)" }}>
         <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-4 px-4 py-3">
-          <Link to={`/pharmacy/${slug}`} className="flex items-center gap-2 text-lg font-bold">{s.logo && <img src={s.logo} alt="" className="h-8 w-8 rounded bg-white object-contain" />}{s.name}</Link>
+          <Link to={`/${slug}`} className="flex items-center gap-2 text-lg font-bold">{s.logo && <img src={s.logo} alt="" className="h-8 w-8 rounded bg-white object-contain" />}{s.name}</Link>
           <nav aria-label="Pharmacy" className="ml-auto flex flex-wrap items-center gap-4 text-sm">
-            <NavLink to={`/pharmacy/${slug}/products`} className={link}>Products</NavLink><NavLink to={`/pharmacy/${slug}/services`} className={link}>Services</NavLink><NavLink to={`/pharmacy/${slug}/institutional`} className={link}>Bulk &amp; institutions</NavLink>
-            {isCustomer ? <><NavLink to={`/pharmacy/${slug}/orders`} className={link}>My orders</NavLink><NavLink to={`/pharmacy/${slug}/feedback`} className={link}>Feedback</NavLink><button onClick={signOut} className="underline">Sign out</button></>
-              : <><NavLink to={`/pharmacy/${slug}/login`} className={link}>Sign in</NavLink><NavLink to={`/pharmacy/${slug}/register`} className={link}>Register</NavLink></>}
-            <NavLink to={`/pharmacy/${slug}/checkout`} className={link} aria-label={`Cart, ${cart.items.length} items`}><ShoppingCart size={18} aria-hidden className="inline" /> {cart.items.length}</NavLink>
+            <NavLink to={`/${slug}/products`} className={link}>Products</NavLink><NavLink to={`/${slug}/services`} className={link}>Services</NavLink><NavLink to={`/${slug}/institutional`} className={link}>Bulk &amp; institutions</NavLink>
+            {isCustomer ? <><NavLink to={`/${slug}/orders`} className={link}>My orders</NavLink><NavLink to={`/${slug}/feedback`} className={link}>Feedback</NavLink><button onClick={signOut} className="underline">Sign out</button></>
+              : <><NavLink to={`/${slug}/login`} className={link}>Sign in</NavLink><NavLink to={`/${slug}/register`} className={link}>Register</NavLink></>}
+            <NavLink to={`/${slug}/checkout`} className={link} aria-label={`Cart, ${cart.items.length} items`}><ShoppingCart size={18} aria-hidden className="inline" /> {cart.items.length}</NavLink>
           </nav>
         </div>
       </header>

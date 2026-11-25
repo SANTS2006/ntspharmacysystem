@@ -1,31 +1,27 @@
 import { zodResolver } from "@hookform/resolvers/zod";
+import { ArrowLeft, KeyRound, Lock, Mail, MailCheck, Send, ShieldCheck } from "lucide-react";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { z } from "zod";
+import { AuthShell, Field, Notice, PasswordRules, SubmitButton } from "../components/auth/AuthUi";
 import { ApiError, api, fetchMe, setTokens } from "../lib/api";
 import { useAuth } from "../lib/auth";
 
-const Shell = ({ title, children }: { title: string; children: React.ReactNode }) => (
-  <main className="grid min-h-screen place-items-center bg-slate-50 p-4">
-    <div className="w-full max-w-md space-y-4 rounded-2xl bg-white p-8 shadow"><h1 className="text-2xl font-semibold">{title}</h1>{children}</div>
-  </main>
-);
 const strong = z.string().min(10, "Use at least 10 characters.").regex(/[A-Za-z]/, "Include a letter.").regex(/\d/, "Include a number.");
 
 export function ForgotPassword({ tenant }: { tenant?: string }) {
   const [sent, setSent] = useState(false);
   const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<{ email: string }>({ resolver: zodResolver(z.object({ email: z.string().email("Enter a valid email address.") })) });
-  if (sent) return <Shell title="Check your email"><p>If an account exists for that address, a reset link has been sent.</p></Shell>;
+  const back = <Link to={tenant ? `/${tenant}/admin/login` : "/platform/login"} className="inline-flex items-center gap-1 font-medium text-[var(--brand)] hover:underline"><ArrowLeft size={15} aria-hidden />Back to sign in</Link>;
+  if (sent) return <AuthShell icon={MailCheck} title="Check your email" subtitle="If an account exists for that address, a reset link has been sent. The link expires soon." footer={back}><p className="text-sm text-slate-500">Did not get it? Check your spam folder, or try again in a minute.</p></AuthShell>;
   return (
-    <Shell title="Reset your password">
+    <AuthShell icon={KeyRound} title="Reset your password" subtitle="Enter your email and we will send you a secure reset link." footer={back}>
       <form noValidate className="space-y-4" onSubmit={handleSubmit(async (v) => { await api("/auth/password-reset/", { method: "POST", body: v, tenant }).catch(() => {}); setSent(true); })}>
-        <label className="block text-sm font-medium">Email <span aria-hidden className="text-red-600">*</span>
-          <input type="email" placeholder="Enter your email address" className="mt-1 w-full rounded border p-2" {...register("email")} />
-          {errors.email && <span role="alert" className="text-xs text-red-600">{errors.email.message}</span>}</label>
-        <button disabled={isSubmitting} className="w-full rounded bg-teal-700 p-2 text-white">Send reset link</button>
+        <Field label="Email" icon={Mail} type="email" placeholder="you@example.com" error={errors.email?.message} {...register("email")} />
+        <SubmitButton busy={isSubmitting} icon={Send}>Send reset link</SubmitButton>
       </form>
-    </Shell>
+    </AuthShell>
   );
 }
 
@@ -34,7 +30,7 @@ const resetSchema = z.object({ new_password: strong, confirm: z.string() }).refi
 function TokenForm({ mode }: { mode: "reset" | "invite" }) {
   const [sp] = useSearchParams(); const nav = useNavigate(); const { setUser } = useAuth();
   const [error, setError] = useState<string | null>(null);
-  const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<z.infer<typeof resetSchema>>({ resolver: zodResolver(resetSchema) });
+  const { register, handleSubmit, watch, formState: { errors, isSubmitting } } = useForm<z.infer<typeof resetSchema>>({ resolver: zodResolver(resetSchema) });
   const tenant = sp.get("tenant") ?? undefined;
   const submit = async (v: z.infer<typeof resetSchema>) => {
     try {
@@ -44,18 +40,16 @@ function TokenForm({ mode }: { mode: "reset" | "invite" }) {
     } catch (e) { setError(e instanceof ApiError ? e.message : "Something went wrong."); }
   };
   return (
-    <Shell title={mode === "reset" ? "Choose a new password" : "Set your password"}>
+    <AuthShell icon={mode === "reset" ? KeyRound : ShieldCheck} title={mode === "reset" ? "Choose a new password" : "Set your password"}
+      subtitle={mode === "reset" ? "Pick a strong password you have not used elsewhere." : "Welcome! Create a password to activate your account."}>
       <form noValidate className="space-y-4" onSubmit={handleSubmit(submit)}>
-        {error && <p role="alert" className="rounded bg-red-50 p-3 text-sm text-red-700">{error} <Link to="/" className="underline">Home</Link></p>}
-        <label className="block text-sm font-medium">New password <span aria-hidden className="text-red-600">*</span>
-          <input type="password" autoComplete="new-password" placeholder="Enter your new password" className="mt-1 w-full rounded border p-2" {...register("new_password")} />
-          {errors.new_password && <span role="alert" className="text-xs text-red-600">{errors.new_password.message}</span>}</label>
-        <label className="block text-sm font-medium">Confirm password <span aria-hidden className="text-red-600">*</span>
-          <input type="password" autoComplete="new-password" placeholder="Confirm your new password" className="mt-1 w-full rounded border p-2" {...register("confirm")} />
-          {errors.confirm && <span role="alert" className="text-xs text-red-600">{errors.confirm.message}</span>}</label>
-        <button disabled={isSubmitting} className="w-full rounded bg-teal-700 p-2 text-white">Save password</button>
+        <Notice message={error} />
+        <Field label="New password" icon={Lock} type="password" autoComplete="new-password" placeholder="Enter your new password" error={errors.new_password?.message} {...register("new_password")} />
+        <PasswordRules value={watch("new_password")} />
+        <Field label="Confirm password" icon={Lock} type="password" autoComplete="new-password" placeholder="Confirm your new password" error={errors.confirm?.message} {...register("confirm")} />
+        <SubmitButton busy={isSubmitting} icon={ShieldCheck}>Save password</SubmitButton>
       </form>
-    </Shell>
+    </AuthShell>
   );
 }
 export const ResetPassword = () => <TokenForm mode="reset" />;
