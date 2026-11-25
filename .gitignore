@@ -14,3 +14,5 @@ backend/frontend_dist/
 *.log
 .env.*
 !.env.example
+.pytest_cache/
+tsconfig.tsbuildinfo
