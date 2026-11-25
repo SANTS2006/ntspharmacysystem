@@ -107,8 +107,8 @@ services:
         sync: false
       - key: PLATFORM_CONTACT_EMAIL
         sync: false
-keyvalue:
-  - name: pharmacy-redis
+  - type: keyvalue
+    name: pharmacy-redis
     plan: starter
     maxmemoryPolicy: noeviction
     ipAllowList: []
