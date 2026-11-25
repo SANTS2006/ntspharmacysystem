@@ -29,48 +29,70 @@ def _absolute(url: str) -> str:
     return base + url if url.startswith("/") and base.startswith("https://") else ""  # email clients need an absolute https URL
 
 
+FONT = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif"
+
+
 def _body(paragraphs, code, button, color) -> str:
-    out = "".join(f'<p style="margin:0 0 14px;line-height:1.6;color:#334155">{_esc(p).replace(chr(10), "<br>")}</p>' for p in paragraphs)
+    out = "".join(f'<p style="margin:0 0 16px;font-size:15px;line-height:1.7;color:#475569">{_esc(p).replace(chr(10), "<br>")}</p>' for p in paragraphs)
     if code:
-        out += (f'<p style="margin:18px 0;text-align:center"><span style="display:inline-block;background:#f1f5f9;border:1px dashed {color};border-radius:8px;'
-                f'padding:12px 22px;font-size:26px;letter-spacing:6px;font-weight:bold;color:#0f172a">{_esc(code)}</span></p>')
+        out += (f'<table role="presentation" align="center" cellpadding="0" cellspacing="0" style="margin:24px auto"><tr><td align="center" '
+                f'style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:14px;padding:16px 28px">'
+                f'<div style="font-size:11px;letter-spacing:2px;text-transform:uppercase;color:#94a3b8;margin-bottom:6px">Your code</div>'
+                f'<div style="font-family:\'SFMono-Regular\',Consolas,Menlo,monospace;font-size:32px;letter-spacing:10px;font-weight:700;color:{color}">{_esc(code)}</div>'
+                f'</td></tr></table>')
     if button and button[1].startswith(("https://", "http://")):
-        out += (f'<p style="margin:22px 0"><a href="{html.escape(button[1], quote=True)}" style="background:{color};color:#ffffff;padding:12px 22px;'
-                f'border-radius:8px;text-decoration:none;display:inline-block;font-weight:bold">{_esc(button[0])}</a></p>')
+        out += (f'<table role="presentation" cellpadding="0" cellspacing="0" style="margin:28px 0 8px"><tr><td align="center" bgcolor="{color}" '
+                f'style="border-radius:12px"><a href="{html.escape(button[1], quote=True)}" style="display:inline-block;padding:14px 30px;font-size:15px;'
+                f'font-weight:700;color:#ffffff;text-decoration:none;border-radius:12px">{_esc(button[0])} &nbsp;&rarr;</a></td></tr></table>'
+                f'<p style="margin:12px 0 0;font-size:12px;color:#94a3b8;word-break:break-all">Button not working? Copy this link: '
+                f'<a href="{html.escape(button[1], quote=True)}" style="color:{color}">{_esc(button[1])}</a></p>')
     return out
 
 
-def render_platform_html(*, title: str, paragraphs: list[str], button=None, code: str = "") -> str:
+def _layout(*, brand: str, logo: str, color: str, color2: str, title: str, body: str, footer: str, preheader: str, eyebrow: str) -> str:
+    logo_html = (f'<img src="{html.escape(logo, quote=True)}" height="40" alt="" style="display:block;height:40px;max-width:140px;border-radius:10px;background:#ffffff;padding:3px">' if logo else "")
+    return (
+        f'<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+        f'<meta name="color-scheme" content="light only"><title>{_esc(title)}</title></head>'
+        f'<body style="margin:0;padding:0;background:#eef2f7;font-family:{FONT}">'
+        f'<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent">{_esc(preheader)}&#8199;&#847;&#8199;&#847;&#8199;&#847;</div>'
+        f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#eef2f7"><tr><td align="center" style="padding:32px 14px">'
+        f'<table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:100%;max-width:600px">'
+        # header
+        f'<tr><td style="background:{color};background-image:linear-gradient(135deg,{color} 0%,{color2} 140%);border-radius:20px 20px 0 0;padding:28px 32px">'
+        f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>{('<td width="1" style="padding-right:14px">' + logo_html + '</td>') if logo_html else ''}'
+        f'<td style="font-size:20px;font-weight:700;color:#ffffff;letter-spacing:.2px">{_esc(brand)}</td></tr></table>'
+        f'<div style="margin-top:22px;font-size:12px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:rgba(255,255,255,.75)">{_esc(eyebrow)}</div></td></tr>'
+        # card
+        f'<tr><td style="background:#ffffff;padding:36px 32px 32px;border-left:1px solid #e2e8f0;border-right:1px solid #e2e8f0">'
+        f'<h1 style="margin:0 0 18px;font-size:26px;line-height:1.25;font-weight:800;color:#0f172a;letter-spacing:-.3px">{_esc(title)}</h1>{body}</td></tr>'
+        # accent rule + footer
+        f'<tr><td style="height:4px;background:{color};background-image:linear-gradient(90deg,{color},{color2});font-size:0;line-height:0">&nbsp;</td></tr>'
+        f'<tr><td style="background:#ffffff;border:1px solid #e2e8f0;border-top:0;border-radius:0 0 20px 20px;padding:24px 32px;font-size:12px;line-height:1.7;color:#64748b">{footer}</td></tr>'
+        f'<tr><td align="center" style="padding:18px 8px;font-size:11px;color:#94a3b8">Please do not share links or codes from this email with anyone.</td></tr>'
+        f'</table></td></tr></table></body></html>')
+
+
+def render_platform_html(*, title: str, paragraphs: list[str], button=None, code: str = "", preheader: str = "") -> str:
     """Template for emails sent by the platform itself (account, billing, backups, security). Uses the platform logo colours."""
-    color, color2 = "#015dc9", "#25bcfb"
-    logo = _absolute("/logo.webp")
-    logo_html = f'<img src="{html.escape(logo, quote=True)}" width="36" height="36" alt="" style="vertical-align:middle;margin-right:10px;border-radius:6px;background:#fff">' if logo else ""
     contact = settings.PLATFORM_CONTACT_EMAIL
-    return (f'<div style="background:#f1f5f9;padding:24px 12px;font-family:Arial,Helvetica,sans-serif">'
-            f'<div style="max-width:580px;margin:auto;background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e2e8f0">'
-            f'<div style="background:{color};background-image:linear-gradient(135deg,{color},{color2});color:#fff;padding:20px 24px;font-size:20px;font-weight:bold">'
-            f'{logo_html}{_esc(settings.PLATFORM_NAME)}</div>'
-            f'<div style="padding:28px 24px"><h2 style="margin:0 0 16px;color:#0f172a;font-size:20px">{_esc(title)}</h2>{_body(paragraphs, code, button, color)}</div>'
-            f'<div style="padding:16px 24px;background:#f8fafc;color:#64748b;font-size:12px;line-height:1.5">'
-            f'You are receiving this email because of activity on your {_esc(settings.PLATFORM_NAME)} account.'
-            f'{(" Questions? Contact " + _esc(contact) + ".") if contact else ""}</div></div></div>')
+    footer = (f'<strong style="color:#334155">{_esc(settings.PLATFORM_NAME)}</strong><br>You are receiving this email because of activity on your account.'
+              f'{("<br>Questions? Write to <a href=\'mailto:" + html.escape(contact, quote=True) + "\' style=\'color:#015dc9\'>" + _esc(contact) + "</a>.") if contact else ""}')
+    return _layout(brand=settings.PLATFORM_NAME, logo=_absolute("/logo.webp"), color="#015dc9", color2="#25bcfb", title=title, body=_body(paragraphs, code, button, "#015dc9"),
+                   footer=footer, preheader=preheader or (paragraphs[0] if paragraphs else title), eyebrow="Account notification")
 
 
-def render_pharmacy_html(*, pharmacy, title: str, paragraphs: list[str], button=None, code: str = "") -> str:
-    """Template for emails sent in a pharmacy's name (receipts, order updates, staff mail): pharmacy logo, colour and contact details."""
+def render_pharmacy_html(*, pharmacy, title: str, paragraphs: list[str], button=None, code: str = "", preheader: str = "") -> str:
+    """Template for emails sent in a pharmacy's name (receipts, order updates, staff mail): pharmacy logo, colours and contact details."""
     color = getattr(pharmacy, "primary_color", None) or "#015dc9"
-    name = pharmacy.name
+    color2 = getattr(pharmacy, "secondary_color", None) or "#25bcfb"
     logo = _absolute(pharmacy.logo.url) if getattr(pharmacy, "logo", None) else ""
-    logo_html = f'<img src="{html.escape(logo, quote=True)}" height="36" alt="" style="vertical-align:middle;margin-right:10px;border-radius:6px;background:#fff;max-width:120px;object-fit:contain">' if logo else ""
     lines = [x for x in (pharmacy.address, pharmacy.contact_phone, pharmacy.contact_email) if x]
-    contact = " &middot; ".join(_esc(x) for x in lines)
-    return (f'<div style="background:#f1f5f9;padding:24px 12px;font-family:Arial,Helvetica,sans-serif">'
-            f'<div style="max-width:580px;margin:auto;background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e2e8f0">'
-            f'<div style="background:{color};color:#fff;padding:20px 24px;font-size:20px;font-weight:bold">{logo_html}{_esc(name)}</div>'
-            f'<div style="padding:28px 24px"><h2 style="margin:0 0 16px;color:#0f172a;font-size:20px">{_esc(title)}</h2>{_body(paragraphs, code, button, color)}</div>'
-            f'<div style="padding:16px 24px;background:#f8fafc;color:#64748b;font-size:12px;line-height:1.6">'
-            f'<strong style="color:#334155">{_esc(name)}</strong>{("<br>" + contact) if contact else ""}'
-            f'<br><span style="color:#94a3b8">Sent securely via {_esc(settings.PLATFORM_NAME)}</span></div></div></div>')
+    contact = "<br>".join(_esc(x) for x in lines)
+    footer = (f'<strong style="color:#334155;font-size:13px">{_esc(pharmacy.name)}</strong>{("<br>" + contact) if contact else ""}'
+              f'<br><span style="color:#94a3b8">Sent securely via {_esc(settings.PLATFORM_NAME)}</span>')
+    return _layout(brand=pharmacy.name, logo=logo, color=color, color2=color2, title=title, body=_body(paragraphs, code, button, color),
+                   footer=footer, preheader=preheader or (paragraphs[0] if paragraphs else title), eyebrow="Message from your pharmacy")
 
 
 def render_branded_html(*, title: str, paragraphs: list[str] = (), pharmacy=None, button: tuple[str, str] | None = None, code: str = "") -> str:
