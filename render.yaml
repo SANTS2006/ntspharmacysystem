@@ -26,7 +26,9 @@ services:
           name: pharmacy-redis
           property: connectionString
       - key: PLATFORM_BASE_DOMAIN
-        sync: false
+        value: ntspharmacy.onrender.com
+      - key: FRONTEND_URL
+        value: https://ntspharmacy.onrender.com
       - key: DATABASE_URL
         sync: false
       - key: DIRECT_DATABASE_URL

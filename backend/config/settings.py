@@ -19,6 +19,10 @@ PLATFORM_NAME = env("PLATFORM_NAME", default="PharmaCloud")
 PLATFORM_BASE_DOMAIN = env("PLATFORM_BASE_DOMAIN", default="localhost")
 FRONTEND_URL = env("FRONTEND_URL", default=env("RENDER_EXTERNAL_URL", default="http://localhost:5173"))  # same origin as the API when served by Django
 
+if not DEBUG and ("localhost" in FRONTEND_URL or "127.0.0.1" in FRONTEND_URL):
+    from django.core.exceptions import ImproperlyConfigured
+    raise ImproperlyConfigured("FRONTEND_URL must be the public https URL in production: every emailed link is built from it.")
+
 INSTALLED_APPS = [
     "daphne",
     "django.contrib.admin",
@@ -86,7 +90,11 @@ TEMPLATES = [{
 }]
 
 # --- Database: PostgreSQL (Neon) via DATABASE_URL. SQLite only as a local/dev/test fallback. ---
-DATABASES = {"default": env.db("DATABASE_URL", default=f"sqlite:///{BASE_DIR / 'db.sqlite3'}")}
+# All data lives in Neon PostgreSQL: there is deliberately NO local-database fallback (tests override DATABASES in settings_test).
+if not env("DATABASE_URL", default="") and not env.bool("DJANGO_ALLOW_SQLITE", default=False):
+    from django.core.exceptions import ImproperlyConfigured
+    raise ImproperlyConfigured("DATABASE_URL (the Neon PostgreSQL connection string) is required.")
+DATABASES = {"default": env.db("DATABASE_URL", default="sqlite:///:memory:")}
 DATABASES["default"]["ATOMIC_REQUESTS"] = True
 if DATABASES["default"]["ENGINE"].endswith("postgresql"):
     # Neon's pooled endpoint is PgBouncer in transaction mode: keep connections short-lived.

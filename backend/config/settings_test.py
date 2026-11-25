@@ -1,4 +1,6 @@
 """Test settings. Tests must NEVER touch a real/cloud database, even if a developer .env contains Neon credentials."""
+import os
+os.environ["DJANGO_ALLOW_SQLITE"] = "1"
 from .settings import *  # noqa: F401,F403
 
 DATABASES = {"default": {"ENGINE": "django.db.backends.sqlite3", "NAME": ":memory:", "ATOMIC_REQUESTS": True}}
