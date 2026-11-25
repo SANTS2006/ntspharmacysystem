@@ -1,11 +1,11 @@
-# Render Blueprint: web service (API + WebSockets + built React app), Celery worker (+beat), private Key Value (Redis).
-# Secrets are `sync: false`: Render asks for them in the dashboard. Enter the SAME DJANGO_SECRET_KEY, FIELD_ENCRYPTION_KEY and
-# BACKUP_ENCRYPTION_KEY on both services (generate with `python manage.py generate_keys`).
+# Render Blueprint (all FREE plans): one web service (API + WebSockets + built React app) and a free Key Value (Redis).
+# Free Render has no background workers, so Celery tasks (emails, etc.) run inline in the web process.
+# Secrets are `sync: false`: Render asks for them in the dashboard. Generate keys with `python manage.py generate_keys`.
 services:
   - type: web
     name: ntspharmacy
     runtime: python
-    plan: starter
+    plan: free
     buildCommand: bash build.sh
     startCommand: cd backend && daphne -b 0.0.0.0 -p $PORT config.asgi:application
     healthCheckPath: /health/live/
@@ -18,58 +18,8 @@ services:
         value: "False"
       - key: PLATFORM_NAME
         value: PharmaCloud
-      - key: REDIS_URL
-        fromService:
-          type: keyvalue
-          name: pharmacy-redis
-          property: connectionString
-      - key: PLATFORM_BASE_DOMAIN
-        sync: false
-      - key: DATABASE_URL
-        sync: false
-      - key: DIRECT_DATABASE_URL
-        sync: false
-      - key: DJANGO_SECRET_KEY
-        sync: false
-      - key: FIELD_ENCRYPTION_KEY
-        sync: false
-      - key: BACKUP_ENCRYPTION_KEY
-        sync: false
-      - key: BREVO_API_KEY
-        sync: false
-      - key: BREVO_SENDER_EMAIL
-        sync: false
-      - key: CLOUDINARY_CLOUD_NAME
-        sync: false
-      - key: CLOUDINARY_API_KEY
-        sync: false
-      - key: CLOUDINARY_API_SECRET
-        sync: false
-      - key: R2_ACCOUNT_ID
-        sync: false
-      - key: R2_ACCESS_KEY_ID
-        sync: false
-      - key: R2_SECRET_ACCESS_KEY
-        sync: false
-      - key: R2_BUCKET
-        sync: false
-      - key: PLATFORM_CONTACT_EMAIL
-        sync: false
-  - type: worker
-    name: ntspharmacy-worker
-    runtime: python
-    plan: starter
-    buildCommand: cd backend && pip install -r requirements.txt
-    startCommand: cd backend && celery -A config worker -B -l info --concurrency 2
-    envVars:
-      - key: PYTHON_VERSION
-        value: 3.13.5
-      - key: NODE_VERSION
-        value: 22.12.0
-      - key: DJANGO_DEBUG
-        value: "False"
-      - key: PLATFORM_NAME
-        value: PharmaCloud
+      - key: CELERY_TASK_ALWAYS_EAGER
+        value: "True"
       - key: REDIS_URL
         fromService:
           type: keyvalue
@@ -109,6 +59,6 @@ services:
         sync: false
   - type: keyvalue
     name: pharmacy-redis
-    plan: starter
+    plan: free
     maxmemoryPolicy: noeviction
     ipAllowList: []

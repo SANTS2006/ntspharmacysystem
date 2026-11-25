@@ -107,7 +107,7 @@ if REDIS_URL:
     CHANNEL_LAYERS = {"default": {"BACKEND": "channels_redis.core.RedisChannelLayer",
                                   "CONFIG": {"hosts": [REDIS_URL]}}}
     CELERY_BROKER_URL = REDIS_URL
-    CELERY_TASK_ALWAYS_EAGER = False
+    CELERY_TASK_ALWAYS_EAGER = env.bool("CELERY_TASK_ALWAYS_EAGER", default=False)  # true on hosts without a worker (e.g. Render free): tasks run inline
 else:
     CACHES = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}}
     CHANNEL_LAYERS = {"default": {"BACKEND": "channels.layers.InMemoryChannelLayer"}}
