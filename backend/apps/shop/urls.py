@@ -1,5 +1,6 @@
 from django.urls import path
 
+from . import customer_views as c
 from . import views as v
 
 urlpatterns = [
@@ -14,11 +15,14 @@ urlpatterns = [
     path("shop/verify-email/", v.VerifyEmailView.as_view()),
     path("shop/resend-code/", v.ResendCodeView.as_view()),
     path("shop/me/", v.MeView.as_view()),
+    path("shop/summary/", v.SummaryView.as_view()),
     path("shop/orders/", v.ShopOrdersView.as_view()),
     path("shop/orders/<int:pk>/", v.ShopOrderDetailView.as_view()),
     path("shop/orders/<int:pk>/cancel/", v.ShopOrderCancelView.as_view()),
     path("shop/orders/<int:pk>/request-refund/", v.ShopOrderRefundView.as_view()),
     path("shop/orders/<int:pk>/prescription/", v.ShopOrderPrescriptionView.as_view()),
+    path("customers/", c.CustomerListView.as_view()),
+    path("customers/<int:pk>/", c.CustomerDetailView.as_view()),
     path("orders/", v.StaffOrdersView.as_view()),
     path("orders/<int:pk>/", v.StaffOrderDetailView.as_view()),
     path("orders/<int:pk>/transition/", v.StaffTransitionView.as_view()),

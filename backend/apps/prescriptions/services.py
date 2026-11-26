@@ -31,6 +31,12 @@ def effective_status(rx: Prescription) -> str:
 def _push(rx, event="prescription.updated"):
     from apps.core.realtime import notify_topic
     notify_topic(rx.tenant_id, rx.branch_id, "prescriptions", event, {"id": rx.pk, "reference": rx.reference_number, "status": rx.status})
+    from apps.notifications import inapp
+    status = rx.status.replace("_", " ")
+    needs_review = rx.status in ("submitted", "pending", "received")  # no patient names in notifications: the record itself is permission-checked
+    inapp.push_staff(rx.tenant_id, "prescription.verify" if needs_review else "prescription.view", rx.branch_id, kind="prescription",
+                     level="warning" if needs_review else "info", title=f"Prescription {rx.reference_number}: {status}",
+                     body="A prescription is waiting for pharmacist review." if needs_review else f"Prescription status changed to {status}.", link="/prescriptions")
 
 
 def _lock(pk) -> Prescription:

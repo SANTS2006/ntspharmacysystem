@@ -102,7 +102,7 @@ class StaffListCreateView(TenantContextMixin, StaffScopedMixin, ListCreateAPIVie
         d, actor, tenant = dict(serializer.validated_data), self.request.user, self.request.tenant
         invite = d.pop("use_invitation", True)
         user = User.objects.create_user(tenant=tenant, created_by=actor, password=None, **d)
-        urls = site_url(tenant.slug, "/admin/login")
+        urls = site_url(tenant.slug, "/login")
         if invite:
             user.set_unusable_password()
             user.must_change_password = True
@@ -120,6 +120,8 @@ class StaffListCreateView(TenantContextMixin, StaffScopedMixin, ListCreateAPIVie
                    html_body=render_branded_html(title="Your staff account", pharmacy=tenant, button=("Open login", urls),
                                                  paragraphs=[f"You have been added as {user.role.name}.", f"Email: {user.email}", cred]))
         serializer.instance = user
+        from apps.notifications import inapp
+        inapp.push([user], kind="account", level="success", title=f"Welcome to {tenant.name}", body=f"You were added as {user.role.name}. Complete your profile and add a photo.", link="/settings")
 
 
 class StaffDetailView(TenantContextMixin, StaffScopedMixin, RetrieveUpdateAPIView):

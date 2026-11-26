@@ -15,12 +15,11 @@
 | TEMP_CREDENTIAL_TTL_HOURS / INVITATION_TTL_HOURS | 72 / 72 | |
 | EMAIL_BACKEND / DEFAULT_FROM_EMAIL | console / no-reply@localhost | Brevo integration lands in Phase 2 |
 
-Planned (not yet read by code): BREVO_API_KEY, MONIME_*, GOOGLE_OAUTH_CLIENT_ID/SECRET, R2_*, WHATSAPP_NUMBER, BACKUP_ENCRYPTION_KEY.
 
 ## Added in Phases 2-9
 BREVO_API_KEY, PLATFORM_WHATSAPP_NUMBER, PLATFORM_CONTACT_EMAIL, TERMS_VERSION, GOOGLE_OAUTH_CLIENT_ID, EMAIL_CODE_TTL_MINUTES / EMAIL_CODE_RESEND_SECONDS / EMAIL_CODE_MAX_ATTEMPTS,
-**FIELD_ENCRYPTION_KEY** (Fernet key, required in production: `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`; losing it makes stored payment secrets unreadable), MONIME_API_BASE (default https://api.monime.io),
-PUBLIC_API_URL (shown to pharmacy admins as the webhook base). Monime credentials are NOT environment variables: each pharmacy stores its own, encrypted, via the API.
+**FIELD_ENCRYPTION_KEY** (Fernet key, required in production: `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`; losing it makes stored payment secrets unreadable), MONIME_SPACE_ID, MONIME_ACCESS_TOKEN, MONIME_WEBHOOK_SECRET (platform-wide mobile money; never entered in the app), MONIME_API_BASE (default https://api.monime.io),
+
 Production needs REDIS_URL (channel layer, Celery, throttling) and a Celery worker plus beat (reconciliation and stock-alert tasks).
 
 ## Added in Phase 13

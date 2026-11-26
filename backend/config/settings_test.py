@@ -23,5 +23,5 @@ import tempfile as _tempfile  # noqa: E402
 STORAGES = {"default": {"BACKEND": "django.core.files.storage.FileSystemStorage", "OPTIONS": {"location": _tempfile.mkdtemp(prefix="pharma_test_media_")}},
             "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"}}
 CLOUDINARY_CLOUD_NAME = CLOUDINARY_API_KEY = CLOUDINARY_API_SECRET = ""
-MONIME_API_KEY = MONIME_SPACE_ID = MONIME_WEBHOOK_SECRET = ""
+MONIME_ACCESS_TOKEN = MONIME_SPACE_ID = MONIME_WEBHOOK_SECRET = ""
 ADMIN_ENABLED = True

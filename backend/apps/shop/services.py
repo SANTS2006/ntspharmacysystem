@@ -21,6 +21,7 @@ from apps.core.tenant_context import get_current_tenant, tenant_context
 from apps.inventory import services as inv
 from apps.inventory.models import Batch
 from apps.medicines.models import Medicine
+from apps.notifications import inapp
 from apps.notifications.services import render_branded_html, send_email
 from apps.procurement.models import next_number
 from apps.tenants.models import Branch
@@ -96,6 +97,10 @@ def verify_email_code(user: User, code: str, request=None) -> str:
         user.email_verified = True
         user.save(update_fields=["email_verified"])
         audit.record("customer.email_verified", actor=user, tenant=user.tenant, request=request)
+        inapp.push_staff(user.tenant_id, "customer.view", None, kind="customer", title="New customer registered",
+                         body=f"{user.full_name} ({user.email}) verified their account.", link=f"/customers/{user.pk}")
+        inapp.push([user], kind="account", level="success", title=f"Welcome to {user.tenant.name}",
+                   body="Your account is ready. Complete your profile so the pharmacy can serve you better.", link="/settings")
         return "ok"
 
 
@@ -214,15 +219,29 @@ def _notify(order: Order, text: str):
     if prefs and not prefs.notification_prefs.get("email_orders", True):
         return
     t = get_current_tenant()
+    from apps.core.links import site_url
     send_email(to=order.customer.email, subject=f"Order {order.reference_number}: {text}", text=f"Your order {order.reference_number} is now: {text}.", tenant=t,
-               template="order_status", html_body=render_branded_html(title="Order update", pharmacy=t, paragraphs=[f"Order {order.reference_number}", f"Status: {text}"]))
+               template="order_status", html_body=render_branded_html(title="Order update", pharmacy=t, paragraphs=[f"Hello {order.customer.full_name}, your order has moved to a new step."],
+                                             details=[("Order", order.reference_number), ("Status", text.capitalize()), ("Total", str(order.total)), ("Branch", order.branch.name)],
+                                             button=("Track your order", site_url(t.slug, f"/account/orders/{order.pk}"))))
 
 
 def _event(order, to, actor, note=""):
+    first_step = order.status == S.PENDING  # the move right after placing is covered by the "order placed" notification
     OrderEvent.objects.create(order=order, from_status=order.status, to_status=to, actor=actor, note=note[:300])
     order.status = to
     order.save(update_fields=["status", "updated_at"])
     _notify(order, to.replace("_", " "))
+    if not first_step:
+        label = to.replace("_", " ")
+        level = ("success" if to in ("payment_confirmed", "ready_for_pickup", "delivered", "completed", "prescription_approved")
+                 else "danger" if to in ("cancelled", "prescription_rejected") else "info")
+        inapp.push([order.customer], kind="order", level=level, title=f"Order {order.reference_number}: {label}",
+                   body=note or f"Your order is now {label}.", link=f"/orders/{order.pk}", exclude=actor)
+        if to in ("payment_confirmed", "refund_requested", "cancelled"):
+            inapp.push_staff(order.tenant_id, "sales.refund" if to == "refund_requested" else "order.manage", order.branch_id, kind="order",
+                             level="warning" if to == "refund_requested" else level, title=f"Order {order.reference_number}: {label}",
+                             body=note, link="/orders", exclude=actor)
     from apps.core.realtime import notify_topic
     notify_topic(order.tenant_id, order.branch_id, "orders", "order.updated", {"id": order.pk, "reference": order.reference_number, "status": to}, users=[order.customer_id])
 
@@ -280,6 +299,12 @@ def create_order(*, customer, branch, fulfilment, items, payment_method, idempot
     audit.record("order.created", actor=customer, target=order, branch_id=branch.pk, reference=order.reference_number, total=str(order.total))
     from apps.core.realtime import notify_topic
     notify_topic(order.tenant_id, branch.pk, "orders", "order.created", {"id": order.pk, "reference": order.reference_number, "status": order.status})
+    inapp.push_staff(order.tenant_id, "order.manage", branch.pk, kind="order", title=f"New online order {order.reference_number}",
+                     body=f"{customer.full_name} placed an order of {order.total} for {fulfilment} at {branch.name}.", link="/orders")
+    next_step = ("Upload your prescription to continue." if needs_rx else "Complete your payment to continue." if payment_method == "monime"
+                 else "The pharmacy will prepare it.")
+    inapp.push([customer], kind="order", level="success", title=f"Order {order.reference_number} placed", body=f"We received your order. {next_step}",
+               link=f"/orders/{order.pk}")
     return order, True
 
 
@@ -410,4 +435,6 @@ def create_qr_request(branch: Branch, *, name, phone, kind, note, items) -> QrRe
         audit.record("qr_request.created", actor=None, tenant=branch.tenant, target=req, branch_id=branch.pk)
         from apps.core.realtime import notify_topic
         notify_topic(branch.tenant_id, branch.pk, "qr", "qr_request.created", {"id": req.pk, "kind": req.kind})
+        inapp.push_staff(branch.tenant_id, "order.manage", branch.pk, kind="order", title=f"New QR {req.kind} request",
+                         body=f"{req.customer_name} ({req.customer_phone}) sent a request at {branch.name}.", link="/orders")
         return req

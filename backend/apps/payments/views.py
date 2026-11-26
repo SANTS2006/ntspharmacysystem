@@ -1,6 +1,5 @@
 from decimal import Decimal
 
-from django.conf import settings
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.views.decorators.csrf import csrf_exempt
@@ -8,32 +7,30 @@ from django.views.decorators.http import require_POST
 from rest_framework import serializers
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
-from apps.accounts.permissions import HasTenantPermission
+from apps.accounts.permissions import HasTenantPermission, IsAuthenticatedAndSettled
+from apps.core.exceptions import BusinessRuleViolation
 from apps.core.views import TenantContextMixin
 from apps.sales.services import render_receipt_pdf
 from apps.shop.models import Order
 from apps.shop.views import IsVerifiedCustomer, order_out, staff_orders
-from apps.tenants.models import Pharmacy
 
-from . import services
-from .models import OrderReceipt, PaymentAttempt, PaymentProviderConfig
+from . import monime, services
+from .models import MobileMoneyCollection, OrderReceipt, PaymentAttempt
 
 MAX_WEBHOOK_BYTES = 64 * 1024
 
 
 @csrf_exempt
 @require_POST
-def monime_webhook(request, slug):
-    """Public endpoint. Authenticity comes only from the HMAC signature over the raw body, checked with this pharmacy's own secret."""
-    tenant = Pharmacy.objects.filter(slug=slug, status=Pharmacy.Status.ACTIVE).first()
-    if tenant is None:
-        return JsonResponse({"error": "not_found"}, status=404)
+def monime_webhook(request, slug=None):
+    """Public endpoint (one for the whole platform). Authenticity comes only from the HMAC signature over the raw body."""
     raw = request.body
     if len(raw) > MAX_WEBHOOK_BYTES:
         return JsonResponse({"error": "too_large"}, status=413)
-    code, outcome = services.handle_webhook(tenant, raw, request.headers.get("Monime-Signature", ""))
+    code, outcome = services.handle_webhook(raw, request.headers.get("Monime-Signature", ""))
     return JsonResponse({"received": code == 200, "outcome": outcome}, status=code)
 
 
@@ -94,38 +91,84 @@ class CustomerReceiptPdfView(CustomerReceiptView):
     pdf = True
 
 
+class RefreshOrderPaymentsView(TenantContextMixin, APIView):
+    """The customer's order page calls this after returning from checkout: the server asks the provider what happened."""
+    permission_classes = [IsVerifiedCustomer]
+    throttle_scope = "payment_refresh"
+
+    def get_throttles(self):
+        return [ScopedRateThrottle()]
+
+    def post(self, request, pk):
+        o = get_object_or_404(Order, pk=pk, customer=request.user)
+        try:
+            services.refresh_attempts(o.payment_attempts.all())
+        except monime.ProviderError:
+            pass
+        o.refresh_from_db()
+        return Response({"status": o.status, "payments": [attempt_out(a) for a in o.payment_attempts.select_related("order")]})
+
+
 # ---------------- staff ----------------
 class StaffBase(TenantContextMixin):
     permission_classes = [HasTenantPermission]
 
 
-class ConfigSerializer(serializers.Serializer):
-    enabled = serializers.BooleanField(required=False)
-    space_id = serializers.CharField(max_length=100, required=False, allow_blank=True)
-    access_token = serializers.CharField(max_length=500, required=False, allow_blank=True, write_only=True)
-    webhook_secret = serializers.CharField(max_length=200, required=False, allow_blank=True, write_only=True)
-
-
-def config_out(request):
-    row = PaymentProviderConfig.objects.filter(provider="monime").first()
-    path = f"/api/v1/webhooks/monime/{request.tenant.slug}/"
-    base = (getattr(settings, "PUBLIC_API_URL", "") or "").rstrip("/")
-    return {"provider": "monime", "enabled": bool(row and row.enabled), "space_id": row.space_id if row else "",
-            "access_token_set": bool(row and row.access_token_enc), "webhook_secret_set": bool(row and row.webhook_secret_enc),
-            "webhook_path": path, "webhook_url": base + path if base else None}
-
-
-class ConfigView(StaffBase, APIView):
-    required_permissions = {"GET": "settings.manage", "PUT": "settings.manage"}
+class StatusView(StaffBase, APIView):
+    """Read-only: whether mobile money is available. Credentials live in the server environment and are never shown or editable."""
+    permission_classes = [IsAuthenticatedAndSettled]
 
     def get(self, request):
-        return Response(config_out(request))
+        return Response({"provider": "monime", "enabled": services.provider_ready(), "currency": services.currency()})
 
-    def put(self, request):
-        s = ConfigSerializer(data=request.data)
-        s.is_valid(raise_exception=True)
-        services.save_config(user=request.user, **s.validated_data)
-        return Response(config_out(request))  # secrets are write-only: never echoed
+
+def collection_out(c: MobileMoneyCollection):
+    return {"id": c.pk, "reference": c.reference, "amount": c.amount, "currency": c.currency, "status": c.status, "ussd_code": c.ussd_code,
+            "customer_name": c.customer_name, "expires_at": c.expires_at, "completed_at": c.completed_at, "used": c.used_at is not None, "used_for": c.used_for}
+
+
+class CollectionBase(StaffBase, APIView):
+    required_permission = "pos.sell"
+
+    def rows(self, request):
+        qs = MobileMoneyCollection.objects.all()
+        return qs.filter(branch_id=request.user.branch_id) if request.user.is_branch_scoped else qs
+
+    def shift_branch(self, request):
+        from apps.sales.services import current_shift
+        shift = current_shift(request.user)
+        if shift is None:
+            raise BusinessRuleViolation("Open a shift before taking payments.")
+        return shift.branch
+
+
+class CollectionsView(CollectionBase):
+    def get(self, request):
+        """Money received at this branch that no sale has used yet (e.g. the sale failed after the customer paid)."""
+        branch = self.shift_branch(request)
+        qs = self.rows(request).filter(branch=branch, status="completed", used_at__isnull=True)[:20]
+        return Response([collection_out(c) for c in qs])
+
+    def post(self, request):
+        amount = serializers.DecimalField(max_digits=14, decimal_places=2).run_validation(request.data.get("amount"))
+        row = services.create_collection(user=request.user, branch=self.shift_branch(request), amount=amount,
+                                         customer_name=str(request.data.get("customer_name", "")).strip())
+        return Response(collection_out(row), status=201)
+
+
+class CollectionDetailView(CollectionBase):
+    def get(self, request, pk):
+        row = get_object_or_404(self.rows(request), pk=pk)
+        try:
+            row = services.refresh_collection(row)
+        except monime.ProviderError:
+            pass  # show the last known state; the screen polls again
+        return Response(collection_out(row))
+
+
+class CollectionCancelView(CollectionBase):
+    def post(self, request, pk):
+        return Response(collection_out(services.cancel_collection(get_object_or_404(self.rows(request), pk=pk), user=request.user)))
 
 
 class AttemptsView(StaffBase, APIView):

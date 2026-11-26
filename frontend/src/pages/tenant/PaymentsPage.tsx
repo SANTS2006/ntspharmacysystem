@@ -1,51 +1,49 @@
+/** Mobile money activity and reconciliation. The provider connection is configured on the server only: nothing is entered here. */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
-import { ApiError, api } from "../../lib/api";
+import { AlertTriangle, CheckCircle2, Clock, RefreshCw, Smartphone, Wallet, XCircle } from "lucide-react";
+import { DataTable, PageHeader, Spinner, StatCard, StatusBadge, errorMessage, useToast } from "../../components/ui";
+import { ServerTable } from "../../components/ui/ServerTable";
+import { api } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
-import { EmptyState, PageHeader } from "../../components/ui";
+import { dateTime, money, words } from "../../lib/format";
 
-interface Config { enabled: boolean; space_id: string; access_token_set: boolean; webhook_secret_set: boolean; webhook_path: string; webhook_url: string | null }
+interface Status { enabled: boolean; currency: string }
 interface Attempt { id: number; reference: string; order: string; amount: string; currency: string; status: string; created_at: string; needs_refund: boolean }
-interface Page<T> { results: T[]; count: number }
-interface Report { by_status: Record<string, { count: number; amount: string }>; stale_pending: number; needs_refund: { id: number; reference: string; amount: string; order__reference_number: string }[] }
-const errText = (e: unknown) => (e instanceof ApiError ? `${e.message} ${e.details ? JSON.stringify(e.details) : ""}` : "Request failed.");
-const inputCls = "mt-1 w-full px-3 py-2 font-normal";
+interface Report { by_status: Record<string, { count: number; amount: string }>; stale_pending: number; needs_refund: { id: number; reference: string; amount: string; order__reference_number: string }[]; unapplied_collections: { id: number; reference: string; amount: string; completed_at: string }[] }
 
 export default function PaymentsPage() {
-  const { user } = useAuth(); const qc = useQueryClient();
-  const can = (p: string) => !!user?.permissions.includes(p);
-  const [msg, setMsg] = useState<{ ok: boolean; t: string } | null>(null);
-  const cfg = useQuery({ queryKey: ["pay-config"], queryFn: () => api<Config>("/payments/config/"), enabled: can("settings.manage") });
-  const attempts = useQuery({ queryKey: ["attempts"], queryFn: () => api<Page<Attempt>>("/payments/attempts/"), enabled: can("order.manage") });
+  const { can } = useAuth(); const qc = useQueryClient(); const toast = useToast();
+  const status = useQuery({ queryKey: ["momo-status"], queryFn: () => api<Status>("/payments/status/") });
   const report = useQuery({ queryKey: ["pay-report"], queryFn: () => api<Report>("/payments/reconciliation/"), enabled: can("accounting.view") });
-  const [f, setF] = useState({ space_id: "", access_token: "", webhook_secret: "", enabled: false });
-  const save = useMutation({
-    mutationFn: () => api<Config>("/payments/config/", { method: "PUT", body: { ...f, space_id: f.space_id || cfg.data?.space_id || "" } }),
-    onSuccess: () => { setF({ ...f, access_token: "", webhook_secret: "" }); setMsg({ ok: true, t: "Saved. Secrets are stored encrypted and cannot be viewed again." }); qc.invalidateQueries({ queryKey: ["pay-config"] }); }, onError: (e) => setMsg({ ok: false, t: errText(e) }),
+  const reconcile = useMutation({
+    mutationFn: () => api<{ checked: number; confirmed: number; failed: number; still_pending: number; errors: number }>("/payments/reconcile/", { method: "POST", body: { older_than_minutes: 0 } }),
+    onSuccess: (r) => { toast(`Checked ${r.checked}: ${r.confirmed} confirmed, ${r.failed} failed, ${r.still_pending} pending${r.errors ? `, ${r.errors} could not be checked` : ""}.`, r.errors ? "error" : "success"); ["pay-report", "attempts", "staff-orders"].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); },
+    onError: (e) => toast(errorMessage(e), "error"),
   });
-  const reconcile = useMutation({ mutationFn: () => api<{ checked: number; confirmed: number; failed: number; still_pending: number }>("/payments/reconcile/", { method: "POST", body: {} }), onSuccess: (r) => { setMsg({ ok: true, t: `Checked ${r.checked}: ${r.confirmed} confirmed, ${r.failed} failed, ${r.still_pending} still pending.` }); qc.invalidateQueries(); }, onError: (e) => setMsg({ ok: false, t: errText(e) }) });
+  const cur = status.data?.currency;
+  const of = (k: string) => report.data?.by_status[k] ?? { count: 0, amount: "0" };
   return (
-    <div className="space-y-4">
-      <PageHeader title="Online payments" subtitle="Payment provider setup, transactions and reconciliation." />
-      {msg && <p role={msg.ok ? "status" : "alert"} className={`alert ${msg.ok ? "alert-success" : "alert-error"}`}>{msg.t}</p>}
-      {can("settings.manage") && cfg.data && (
-        <form onSubmit={(e) => { e.preventDefault(); setMsg(null); save.mutate(); }} className="grid max-w-2xl gap-3 card p-4">
-          <h2 className="section-title">Monime connection</h2>
-          <p className="text-sm text-slate-600">Use this pharmacy's own Monime space so payments go to your account. In the Monime dashboard create a webhook pointing to <code>{cfg.data.webhook_url ?? cfg.data.webhook_path}</code> (event: checkout session completed/cancelled/expired) and paste its HMAC secret below.</p>
-          <label className="text-sm font-medium">Space id<input className={inputCls} placeholder="Enter your Monime space id" defaultValue={cfg.data.space_id} onChange={(e) => setF({ ...f, space_id: e.target.value })} /></label>
-          <label className="text-sm font-medium">Access token {cfg.data.access_token_set && <em className="font-normal text-green-700">(saved)</em>}<input type="password" autoComplete="off" className={inputCls} placeholder="Enter a new access token to replace the saved one" value={f.access_token} onChange={(e) => setF({ ...f, access_token: e.target.value })} /></label>
-          <label className="text-sm font-medium">Webhook secret {cfg.data.webhook_secret_set && <em className="font-normal text-green-700">(saved)</em>}<input type="password" autoComplete="off" className={inputCls} placeholder="Enter the webhook HMAC secret" value={f.webhook_secret} onChange={(e) => setF({ ...f, webhook_secret: e.target.value })} /></label>
-          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={f.enabled} onChange={(e) => setF({ ...f, enabled: e.target.checked })} /> Enable online payment at checkout (currently {cfg.data.enabled ? "on" : "off"})</label>
-          <button disabled={save.isPending} className="btn btn-primary w-40">Save</button>
-        </form>)}
-      {can("accounting.view") && report.data && (
-        <section className="card p-4"><div className="flex items-center justify-between"><h2 className="section-title">Reconciliation</h2>{can("accounting.manage") && <button className="btn btn-outline btn-sm" onClick={() => reconcile.mutate()}>Check pending payments with provider</button>}</div>
-          <ul className="mt-2 text-sm">{Object.entries(report.data.by_status).map(([k, v]) => <li key={k}>{k}: {v.count} · {v.amount}</li>)}</ul>
-          {report.data.stale_pending > 0 && <p className="text-amber-700">{report.data.stale_pending} payment(s) have been pending for over 30 minutes.</p>}
-          {report.data.needs_refund.length > 0 && <div className="mt-2 rounded bg-red-50 p-2 text-sm text-red-800"><strong>Paid but not fulfilled: arrange a refund</strong><ul>{report.data.needs_refund.map((r) => <li key={r.id}>{r.reference} · order {r.order__reference_number} · {r.amount}</li>)}</ul></div>}</section>)}
-      {can("order.manage") && <section><h2 className="section-title mb-3">Payment attempts</h2>{attempts.data?.results.length === 0 && <EmptyState>No online payments yet.</EmptyState>}
-        <div className="table-wrap"><table className="table"><thead><tr><th>Reference</th><th>Order</th><th>Amount</th><th>Status</th><th>Created</th></tr></thead>
-          <tbody>{attempts.data?.results.map((a) => <tr key={a.id}><td>{a.reference}</td><td>{a.order}</td><td>{a.currency} {a.amount}</td><td>{a.status}{a.needs_refund && " · refund needed"}</td><td>{new Date(a.created_at).toLocaleString()}</td></tr>)}</tbody></table></div></section>}
+    <div className="space-y-5">
+      <PageHeader title="Online payments" subtitle="Mobile money payments and reconciliation."
+        actions={can("accounting.manage") && <button className="btn btn-primary" disabled={reconcile.isPending || !status.data?.enabled} onClick={() => reconcile.mutate()}>{reconcile.isPending ? <Spinner /> : <RefreshCw size={16} aria-hidden />}Check pending payments</button>} />
+      {status.data && <p className={`alert ${status.data.enabled ? "alert-success" : "alert-warning"}`}><Smartphone size={18} aria-hidden />{status.data.enabled ? "Mobile money is active: customers can pay online and cashiers can request payments at the till." : "Mobile money is not available yet. Please contact the platform administrator."}</p>}
+      {report.data && (
+        <>
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <StatCard label="Completed" value={money(of("completed").amount, cur)} hint={`${of("completed").count} payments`} icon={CheckCircle2} />
+            <StatCard label="Pending" value={of("pending").count + of("initiated").count} hint={report.data.stale_pending ? `${report.data.stale_pending} waiting over 30 minutes` : "Nothing overdue"} icon={Clock} tone="warning" />
+            <StatCard label="Not completed" value={of("failed").count + of("cancelled").count + of("expired").count} icon={XCircle} tone="danger" />
+            <StatCard label="Counter money not yet applied" value={report.data.unapplied_collections.length} icon={Wallet} tone="info" />
+          </div>
+          {report.data.needs_refund.length > 0 && <section className="space-y-2"><h2 className="section-title flex items-center gap-2 text-red-700"><AlertTriangle size={17} aria-hidden />Paid but not fulfilled: arrange a refund</h2>
+            <DataTable rows={report.data.needs_refund} rowKey={(r) => r.id} pageSize={5} columns={[{ key: "reference", header: "Payment", render: (r) => <b>{r.reference}</b> }, { key: "order", header: "Order", render: (r) => r.order__reference_number }, { key: "amount", header: "Amount", align: "right", render: (r) => money(r.amount, cur) }]} /></section>}
+          {report.data.unapplied_collections.length > 0 && <section className="space-y-2"><h2 className="section-title">Money received at the till that no sale has used</h2>
+            <DataTable rows={report.data.unapplied_collections} rowKey={(r) => r.id} pageSize={5} columns={[{ key: "reference", header: "Reference", render: (r) => <b>{r.reference}</b> }, { key: "when", header: "Received", render: (r) => dateTime(r.completed_at) }, { key: "amount", header: "Amount", align: "right", render: (r) => money(r.amount, cur) }]} /></section>}
+        </>)}
+      {can("order.manage") && <section className="space-y-3"><h2 className="section-title">Online payment history</h2>
+        <ServerTable<Attempt> queryKey={["attempts"]} path="/payments/attempts/" rowKey={(a) => a.id} empty="No online payments yet." refetchInterval={30000}
+          filters={[{ name: "status", label: "All statuses", options: ["pending", "completed", "failed", "cancelled", "expired"].map((s) => [s, words(s)]) }]}
+          columns={[{ key: "reference", header: "Reference", render: (a) => <b>{a.reference}</b> }, { key: "order", header: "Order", render: (a) => a.order }, { key: "created", header: "Started", render: (a) => dateTime(a.created_at) }, { key: "status", header: "Status", render: (a) => <><StatusBadge status={a.status} />{a.needs_refund && <span className="badge badge-danger ml-1">refund needed</span>}</> }, { key: "amount", header: "Amount", align: "right", render: (a) => <b>{money(a.amount, a.currency)}</b> }]} /></section>}
     </div>
   );
 }

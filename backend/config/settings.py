@@ -150,7 +150,7 @@ SIMPLE_JWT = {
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": ["apps.accounts.authentication.TenantAwareJWTAuthentication"],
     "DEFAULT_PERMISSION_CLASSES": ["apps.accounts.permissions.IsAuthenticatedAndSettled"],
-    "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
+    "DEFAULT_PAGINATION_CLASS": "apps.core.pagination.StandardPagination",
     "PAGE_SIZE": 25,
     "DEFAULT_FILTER_BACKENDS": ["django_filters.rest_framework.DjangoFilterBackend",
                                 "rest_framework.filters.SearchFilter", "rest_framework.filters.OrderingFilter"],
@@ -158,7 +158,7 @@ REST_FRAMEWORK = {
     "EXCEPTION_HANDLER": "apps.core.exceptions.api_exception_handler",
     "DEFAULT_THROTTLE_CLASSES": ["rest_framework.throttling.AnonRateThrottle",
                                  "rest_framework.throttling.UserRateThrottle"],
-    "DEFAULT_THROTTLE_RATES": {"anon": "60/min", "user": "300/min", "login": "10/min", "sensitive": "5/min", "public_write": "10/hour", "verify": "10/min"},
+    "DEFAULT_THROTTLE_RATES": {"anon": "60/min", "user": "300/min", "login": "10/min", "sensitive": "5/min", "public_write": "10/hour", "verify": "10/min", "payment_refresh": "30/min"},
 }
 SPECTACULAR_SETTINGS = {"TITLE": f"{PLATFORM_NAME} API", "VERSION": "1.0.0", "SERVE_INCLUDE_SCHEMA": False}
 
@@ -276,7 +276,7 @@ if CLOUDINARY_CLOUD_NAME and CLOUDINARY_API_KEY and CLOUDINARY_API_SECRET:
 CELERY_BEAT_SCHEDULE["scheduled-backup"] = {"task": "apps.backups.tasks.scheduled_backup", "schedule": crontab(minute=0, hour=f"*/{max(1, BACKUP_SCHEDULE_HOURS)}")}
 CELERY_BEAT_SCHEDULE["purge-expired-backups"] = {"task": "apps.backups.tasks.purge_expired", "schedule": crontab(hour=3, minute=30)}
 
-# --- Monime (live payments). Credentials are PER PHARMACY (stored encrypted); these env values only seed a pharmacy via `manage.py configure_monime`. ---
-MONIME_API_KEY = env("MONIME_API_KEY", default="")
+# --- Monime (live mobile money). ONE platform-wide Monime space, configured only through the environment (never from the UI). ---
+MONIME_ACCESS_TOKEN = env("MONIME_ACCESS_TOKEN", default="") or env("MONIME_API_KEY", default="")
 MONIME_SPACE_ID = env("MONIME_SPACE_ID", default="")
 MONIME_WEBHOOK_SECRET = env("MONIME_WEBHOOK_SECRET", default="")

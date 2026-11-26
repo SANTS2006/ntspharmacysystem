@@ -1,127 +1,101 @@
-import { zodResolver } from "@hookform/resolvers/zod";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
-import { useForm } from "react-hook-form";
-import { Link } from "react-router-dom";
-import { z } from "zod";
-import { ApiError, api } from "../../lib/api";
-import { EmptyState, Loading, PageHeader } from "../../components/ui";
+import { useQueryClient } from "@tanstack/react-query";
+import { ArrowLeft, ArrowRight, Check, ImageUp, Plus, Store } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { ColorPicker, FormFields, Modal, PageHeader, Spinner, StatusBadge, errorMessage, initialValues, useToast, type FieldDef, type Values } from "../../components/ui";
+import { ServerTable } from "../../components/ui/ServerTable";
+import { api } from "../../lib/api";
+import { day, readableOn } from "../../lib/format";
 
-export interface Pharmacy { id: number; name: string; slug: string; status: string; city: string; country: string; created_at: string; primary_color: string }
-interface Page<T> { count: number; next: string | null; previous: string | null; results: T[] }
+export interface Pharmacy { id: number; name: string; slug: string; status: string; city: string; country: string; created_at: string; primary_color: string; secondary_color: string; logo?: string | null }
 
-const hex = z.string().regex(/^#[0-9A-Fa-f]{6}$/, "Enter a color like #059669.");
-const schema = z.object({
-  name: z.string().min(2, "Enter the pharmacy name."),
-  slug: z.string().regex(/^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/, "Use 3-63 lowercase letters, numbers or hyphens."),
-  description: z.string().optional(),
-  registration_number: z.string().optional(), license_number: z.string().optional(),
-  address: z.string().optional(), country: z.string().min(2, "Enter the country."), region: z.string().optional(), city: z.string().optional(),
-  contact_email: z.union([z.literal(""), z.string().email("Enter a valid email address.")]), contact_phone: z.string().optional(),
-  primary_color: hex, secondary_color: hex,
-  admin_full_name: z.string().min(2, "Enter the administrator's full name."),
-  admin_email: z.string().email("Enter a valid email address."), admin_phone: z.string().optional(),
-  use_invitation: z.boolean(),
-});
-type Form = z.infer<typeof schema>;
+const DETAILS: FieldDef[] = [
+  { name: "name", label: "Pharmacy name" }, { name: "slug", label: "Website address name", hint: "3–63 lowercase letters, numbers or hyphens" },
+  { name: "registration_number", label: "Registration number", required: false }, { name: "license_number", label: "License number", required: false },
+  { name: "country", label: "Country", defaultValue: "Sierra Leone" }, { name: "region", label: "Region", required: false },
+  { name: "city", label: "City", required: false }, { name: "address", label: "Pharmacy address", required: false },
+  { name: "contact_email", label: "Contact email", type: "email", required: false }, { name: "contact_phone", label: "Contact phone", type: "tel", required: false },
+  { name: "description", label: "Pharmacy description", type: "textarea", required: false },
+];
+const ADMIN: FieldDef[] = [
+  { name: "admin_full_name", label: "Administrator full name" }, { name: "admin_email", label: "Administrator email", type: "email" },
+  { name: "admin_phone", label: "Administrator phone", type: "tel", required: false },
+  { name: "use_invitation", label: "Send a one-time invitation link instead of a temporary password (recommended)", type: "checkbox", defaultValue: true },
+];
+const STEPS = ["Pharmacy details", "Branding", "Administrator"];
+const slugify = (v: string) => v.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 63);
 
-function Field({ label, error, required, children }: { label: string; error?: string; required?: boolean; children: React.ReactNode }) {
-  return (
-    <label className="block text-sm font-medium">{label} {required && <span aria-hidden className="text-red-600">*</span>}
-      {children}{error && <span role="alert" className="block text-xs text-red-600">{error}</span>}
-    </label>
-  );
-}
-const input = "mt-1 w-full px-3 py-2 font-normal";
-
-function RegisterForm({ onDone }: { onDone: () => void }) {
-  const qc = useQueryClient();
+/** Three short steps: details, branding (logo and colour pickers) and the first administrator. */
+function RegisterDialog({ onClose }: { onClose: () => void }) {
+  const qc = useQueryClient(); const toast = useToast();
+  const [step, setStep] = useState(0);
+  const [values, setValues] = useState<Values>(() => ({ ...initialValues([...DETAILS, ...ADMIN]), primary_color: "#047857", secondary_color: "#142d3d" }));
   const [logo, setLogo] = useState<File | null>(null);
-  const [serverError, setServerError] = useState<string | null>(null);
-  const { register, handleSubmit, formState: { errors } } = useForm<Form>({
-    resolver: zodResolver(schema),
-    defaultValues: { country: "Sierra Leone", primary_color: "#059669", secondary_color: "#142D3D", use_invitation: true, contact_email: "" },
-  });
-  const m = useMutation({
-    mutationFn: (v: Form) => {
+  const [preview, setPreview] = useState<string | null>(null);
+  const [error, setError] = useState(""); const [busy, setBusy] = useState(false); const [slugTouched, setSlugTouched] = useState(false);
+  const file = useRef<HTMLInputElement>(null);
+  useEffect(() => { if (!logo) { setPreview(null); return; } const url = URL.createObjectURL(logo); setPreview(url); return () => URL.revokeObjectURL(url); }, [logo]);
+  const set = (name: string, v: string) => {
+    if (name === "slug") setSlugTouched(true);
+    setValues((x) => ({ ...x, [name]: v, ...(name === "name" && !slugTouched ? { slug: slugify(v) } : {}) }));
+  };
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault(); setError("");
+    if (step === 0 && !/^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/.test(values.slug)) { setError("The website address name needs 3–63 lowercase letters, numbers or hyphens."); return; }
+    if (step === 1 && ![values.primary_color, values.secondary_color].every((c) => /^#[0-9a-f]{6}$/i.test(c))) { setError("Both colours must be six-digit hex colours."); return; }
+    if (step < 2) { setStep(step + 1); return; }
+    setBusy(true);
+    try {
       const fd = new FormData();
-      Object.entries(v).forEach(([k, val]) => { if (val !== undefined && val !== "") fd.append(k, String(val)); });
+      Object.entries(values).forEach(([k, v]) => { if (k === "use_invitation") fd.append(k, v === "true" ? "true" : "false"); else if (v !== "") fd.append(k, v); });
       if (logo) fd.append("logo", logo);
-      return api<Pharmacy>("/platform/pharmacies/", { method: "POST", body: fd });
-    },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["pharmacies"] }); onDone(); },
-    onError: (e) => setServerError(e instanceof ApiError ? `${e.message} ${e.details ? JSON.stringify(e.details) : ""}` : "Registration failed."),
-  });
+      await api("/platform/pharmacies/", { method: "POST", body: fd });
+      qc.invalidateQueries({ queryKey: ["pharmacies"] }); qc.invalidateQueries({ queryKey: ["platform-dashboard"] });
+      toast(`${values.name} was registered. The administrator has been emailed.`); onClose();
+    } catch (err) { setError(errorMessage(err)); setBusy(false); }
+  };
   return (
-    <form onSubmit={handleSubmit((v) => { setServerError(null); m.mutate(v); })} noValidate className="grid gap-3 rounded-xl bg-white p-6 shadow md:grid-cols-2">
-      <h2 className="text-lg font-semibold md:col-span-2">Register a pharmacy</h2>
-      {serverError && <p role="alert" className="rounded bg-red-50 p-3 text-sm text-red-700 md:col-span-2">{serverError}</p>}
-      <Field label="Pharmacy name" required error={errors.name?.message}><input className={input} placeholder="Enter the pharmacy name" {...register("name")} /></Field>
-      <Field label="Website address (slug)" required error={errors.slug?.message}><input className={input} placeholder="Enter the pharmacy slug" {...register("slug")} /></Field>
-      <Field label="Registration number"><input className={input} placeholder="Enter the registration number" {...register("registration_number")} /></Field>
-      <Field label="License number"><input className={input} placeholder="Enter the license number" {...register("license_number")} /></Field>
-      <Field label="Country" required error={errors.country?.message}><input className={input} placeholder="Enter the country" {...register("country")} /></Field>
-      <Field label="Region"><input className={input} placeholder="Enter the region" {...register("region")} /></Field>
-      <Field label="City"><input className={input} placeholder="Enter the city" {...register("city")} /></Field>
-      <Field label="Address"><input className={input} placeholder="Enter the address" {...register("address")} /></Field>
-      <Field label="Contact email" error={errors.contact_email?.message}><input className={input} placeholder="Enter the contact email" {...register("contact_email")} /></Field>
-      <Field label="Contact phone"><input className={input} placeholder="Enter the contact phone" {...register("contact_phone")} /></Field>
-      <Field label="Primary color" error={errors.primary_color?.message}><input className={input} placeholder="Enter the primary color" {...register("primary_color")} /></Field>
-      <Field label="Secondary color" error={errors.secondary_color?.message}><input className={input} placeholder="Enter the secondary color" {...register("secondary_color")} /></Field>
-      <Field label="Logo (PNG, JPG or WebP, max 2 MB)"><input type="file" accept="image/png,image/jpeg,image/webp" className={input} onChange={(e) => setLogo(e.target.files?.[0] ?? null)} /></Field>
-      <Field label="Description"><textarea className={input} placeholder="Enter the pharmacy description" {...register("description")} /></Field>
-      <Field label="Administrator full name" required error={errors.admin_full_name?.message}><input className={input} placeholder="Enter the administrator's full name" {...register("admin_full_name")} /></Field>
-      <Field label="Administrator email" required error={errors.admin_email?.message}><input className={input} placeholder="Enter the administrator's email" {...register("admin_email")} /></Field>
-      <Field label="Administrator phone"><input className={input} placeholder="Enter the administrator's phone" {...register("admin_phone")} /></Field>
-      <label className="flex items-center gap-2 text-sm md:col-span-2"><input type="checkbox" {...register("use_invitation")} /> Send a one-time invitation link instead of a temporary password (recommended)</label>
-      <div className="flex gap-2 md:col-span-2">
-        <button disabled={m.isPending} className="btn btn-primary">{m.isPending ? "Registering…" : "Register pharmacy"}</button>
-        <button type="button" onClick={onDone} className="btn btn-outline">Cancel</button>
-      </div>
-    </form>
+    <Modal title="Register a pharmacy" size="lg" onClose={onClose}>
+      <ol className="mb-5 flex gap-2" aria-label="Steps">{STEPS.map((s, i) => <li key={s} aria-current={i === step ? "step" : undefined} className="flex-1"><span className="block h-1.5 rounded-full transition-colors" style={{ background: i <= step ? "var(--brand)" : "var(--color-line)" }} /><span className={`mt-1.5 block text-xs ${i === step ? "font-bold" : "text-muted"}`}>{i + 1}. {s}</span></li>)}</ol>
+      <form onSubmit={submit} className="space-y-4">
+        {error && <p role="alert" className="alert alert-error">{error}</p>}
+        {step === 0 && <FormFields fields={DETAILS} values={values} set={set} />}
+        {step === 1 && <div className="space-y-4">
+          <div className="flex flex-wrap items-center gap-4 rounded-xl border border-line p-4">
+            <span className="grid h-20 w-20 place-items-center overflow-hidden rounded-2xl border border-line bg-[#fff]">{preview ? <img src={preview} alt="Logo preview" className="h-full w-full object-contain p-2" /> : <Store size={30} aria-hidden style={{ color: "#64748b" }} />}</span>
+            <div><input ref={file} type="file" accept="image/png,image/jpeg,image/webp" className="sr-only" aria-label="Choose a logo" onChange={(e) => setLogo(e.target.files?.[0] ?? null)} /><button type="button" className="btn btn-outline" onClick={() => file.current?.click()}><ImageUp size={16} aria-hidden />{logo ? "Change logo" : "Upload logo"}</button><p className="mt-1.5 text-xs text-muted">PNG, JPG or WebP, up to 2 MB. Choose a logo to pick colours from it.</p></div>
+          </div>
+          <div className="grid gap-4 lg:grid-cols-2"><ColorPicker label="Primary color" value={values.primary_color} logo={logo} onChange={(v) => set("primary_color", v)} /><ColorPicker label="Secondary color" value={values.secondary_color} logo={logo} onChange={(v) => set("secondary_color", v)} /></div>
+          <div className="rounded-2xl p-5 text-center font-extrabold" style={{ background: `linear-gradient(135deg, ${values.primary_color}, ${values.secondary_color})`, color: readableOn(values.primary_color) }}>{values.name || "Your pharmacy"}</div>
+        </div>}
+        {step === 2 && <FormFields fields={ADMIN} values={values} set={set} />}
+        <div className="flex justify-between gap-2 border-t border-line pt-4">
+          {step > 0 ? <button type="button" className="btn btn-outline" onClick={() => { setError(""); setStep(step - 1); }}><ArrowLeft size={15} aria-hidden />Back</button> : <button type="button" className="btn btn-outline" onClick={onClose}>Cancel</button>}
+          <button className="btn btn-primary" disabled={busy}>{busy ? <Spinner /> : step === 2 ? <Check size={16} aria-hidden /> : null}{step === 2 ? (busy ? "Registering…" : "Register pharmacy") : "Continue"}{step < 2 && <ArrowRight size={15} aria-hidden />}</button>
+        </div>
+      </form>
+    </Modal>
   );
 }
 
 export default function Pharmacies() {
-  const [q, setQ] = useState(""); const [status, setStatus] = useState(""); const [page, setPage] = useState(1); const [adding, setAdding] = useState(false);
-  const { data, isLoading, isError } = useQuery({
-    queryKey: ["pharmacies", q, status, page],
-    queryFn: () => api<Page<Pharmacy>>(`/platform/pharmacies/?page=${page}&search=${encodeURIComponent(q)}${status ? `&status=${status}` : ""}`),
-  });
+  const nav = useNavigate();
+  const [sp, setSp] = useSearchParams();
+  const adding = sp.get("new") === "1";
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <PageHeader title="Pharmacies" subtitle="Register and manage pharmacy tenants." />
-        <button onClick={() => setAdding(true)} className="btn btn-primary">Register pharmacy</button>
-      </div>
-      {adding && <RegisterForm onDone={() => setAdding(false)} />}
-      <div className="flex gap-2">
-        <input aria-label="Search pharmacies" placeholder="Enter a pharmacy name or slug" value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} className="w-64 px-3 py-2" />
-        <select aria-label="Filter by status" value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); }} className="px-3 py-2">
-          <option value="">All statuses</option><option value="active">Active</option><option value="suspended">Suspended</option>
-        </select>
-      </div>
-      {isLoading && <Loading />}
-      {isError && <p role="alert">Pharmacies could not be loaded.</p>}
-      {data && data.results.length === 0 && <EmptyState>No pharmacies found.</EmptyState>}
-      {data && data.results.length > 0 && (
-        <div className="table-wrap">
-          <table className="table">
-            <thead><tr><th>Name</th><th>Address</th><th>Location</th><th>Status</th></tr></thead>
-            <tbody>{data.results.map((p) => (
-              <tr key={p.id}>
-                <td><Link className="font-medium text-teal-800 underline" to={`/platform/pharmacies/${p.id}`}>{p.name}</Link></td>
-                <td>/{p.slug}</td><td>{[p.city, p.country].filter(Boolean).join(", ")}</td>
-                <td><span className={`rounded px-2 py-0.5 text-xs ${p.status === "active" ? "bg-green-100 text-green-800" : "bg-amber-100 text-amber-800"}`}>{p.status}</span></td>
-              </tr>))}</tbody>
-          </table>
-        </div>
-      )}
-      <div className="flex items-center gap-2">
-        <button disabled={!data?.previous} onClick={() => setPage((p) => p - 1)} className="btn btn-outline btn-sm">Previous</button>
-        <span className="text-sm">Page {page}</span>
-        <button disabled={!data?.next} onClick={() => setPage((p) => p + 1)} className="btn btn-outline btn-sm">Next</button>
-      </div>
+    <div className="space-y-5">
+      <PageHeader title="Pharmacies" subtitle="Register and manage pharmacy tenants." actions={<button className="btn btn-primary" onClick={() => setSp({ new: "1" })}><Plus size={16} aria-hidden />Register pharmacy</button>} />
+      <ServerTable<Pharmacy> queryKey={["pharmacies"]} path="/platform/pharmacies/" rowKey={(p) => p.id} search="Enter your pharmacy search" empty="No pharmacies found." onRowClick={(p) => nav(`/platform/pharmacies/${p.id}`)}
+        filters={[{ name: "status", label: "All statuses", options: [["active", "Active"], ["suspended", "Suspended"]] }]}
+        columns={[
+          { key: "name", header: "Pharmacy", render: (p) => <span className="flex items-center gap-3">{p.logo ? <img src={p.logo} alt="" className="h-10 w-10 rounded-xl border border-line bg-[#fff] object-contain p-1" /> : <span className="grid h-10 w-10 place-items-center rounded-xl font-bold" style={{ background: p.primary_color, color: readableOn(p.primary_color) }}>{p.name[0]}</span>}<Link className="font-bold hover:underline" to={`/platform/pharmacies/${p.id}`}>{p.name}</Link></span> },
+          { key: "slug", header: "Website", render: (p) => <a className="text-primary hover:underline" href={`/${p.slug}`} target="_blank" rel="noopener noreferrer">/{p.slug}</a> },
+          { key: "location", header: "Location", render: (p) => [p.city, p.country].filter(Boolean).join(", ") || "—" },
+          { key: "created", header: "Registered", render: (p) => day(p.created_at) },
+          { key: "status", header: "Status", render: (p) => <StatusBadge status={p.status} /> },
+          { key: "actions", header: "Actions", align: "right", render: (p) => <Link className="btn-link" to={`/platform/pharmacies/${p.id}`}>Manage</Link> },
+        ]} />
+      {adding && <RegisterDialog onClose={() => setSp({})} />}
     </div>
   );
 }

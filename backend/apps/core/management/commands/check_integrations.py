@@ -44,7 +44,14 @@ class Command(BaseCommand):
             r2_client().head_bucket(Bucket=settings.R2_BACKUP_BUCKET)
             return f"bucket '{settings.R2_BACKUP_BUCKET}' reachable, BACKUP_STORAGE={settings.BACKUP_STORAGE}"
 
+        def momo():
+            from apps.payments import monime
+            monime.check_credentials()
+            hook = "set" if settings.MONIME_WEBHOOK_SECRET else "MISSING (payments then confirm only when the order or till screen is open)"
+            return f"token and space accepted; webhook secret {hook}"
+
         run("database", db)
+        run("monime", momo)
         run("brevo", brevo)
         run("cloudinary", cloud)
         run("r2", r2)

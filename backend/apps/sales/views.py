@@ -17,7 +17,7 @@ from apps.core.fields import TenantPKField
 from apps.core.views import TenantContextMixin
 from apps.inventory.selectors import branch_ids_for, medicines_with_stock
 from apps.medicines.models import Medicine
-from apps.notifications.services import render_branded_html, send_email
+from apps.notifications.services import receipt_parts, render_branded_html, send_email
 from apps.prescriptions.models import Dispensing
 from apps.tenants.models import Branch
 
@@ -340,6 +340,7 @@ class ReceiptEmailView(Base, APIView):
         rows = [f"{l['name']} x{l['quantity']} = {l['total']}" for l in d["lines"]]
         paragraphs = [f"Receipt {rc.number} · Sale {d['sale_reference']}", *rows, f"Total: {d['currency']} {d['total']}", f"Paid: {d['amount_paid']} ({d['payment_status']})"]
         send_email(to=to, subject=f"Your receipt {rc.number} from {d['pharmacy']}", text="\n".join(paragraphs), tenant=request.tenant, template="receipt",
-                   html_body=render_branded_html(title="Your receipt", pharmacy=request.tenant, paragraphs=paragraphs))
+                   html_body=render_branded_html(title="Your receipt", pharmacy=request.tenant, paragraphs=["Thank you for your purchase. Here is your receipt."],
+                                                 **receipt_parts({"receipt_number": rc.number, **d})))
         audit.record("receipt.emailed", actor=request.user, target=sale, branch_id=sale.branch_id)
         return Response(status=202)

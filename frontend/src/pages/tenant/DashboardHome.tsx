@@ -1,137 +1,159 @@
-/** Staff home dashboard. Every figure comes from an existing API; each panel is only requested when the user's permissions allow it. */
+/** The pharmacy dashboard. The API returns only the sections this person's role allows, so each role gets its own analysis. */
 import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, ArrowRight, Banknote, Building2, CalendarClock, Package, PackageX, Pill, Receipt, ScrollText, ShoppingCart, Stethoscope, TrendingUp, Users, Wallet, type LucideIcon } from "lucide-react";
+import { AlertTriangle, ArrowDownRight, ArrowUpRight, Banknote, Boxes, CalendarClock, ClipboardList, FileText, HeartHandshake, Package, PackageMinus, Pill, Receipt, RotateCcw, ScrollText, ShoppingCart, Star, Truck, UserPlus, Users, Wallet, type LucideIcon } from "lucide-react";
+import { useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
-import { BarList, EmptyState, ErrorState, Loading, PageHeader, StatCard, StatusBadge } from "../../components/ui";
+import { ChartCard, DonutChart, RankBars, TrendChart, itemsTable, type Item } from "../../components/charts";
+import { ErrorState, Loading, StatCard, errorMessage } from "../../components/ui";
 import { api } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
+import { day, money, words } from "../../lib/format";
 
-interface Page<T> { count: number; results: T[] }
-interface Basic { scope: string; branches: number; employees: number; pharmacists: number; customers: number | null; staff_by_role: { role__name: string; n: number }[] }
-interface Dash {
-  medicines: { total: number; low_stock: number; out_of_stock: number; near_expiry_batches: number; expired_batches: number; inventory_value: string };
-  sales: { today: string; month: string; transactions: number };
-  orders: { pending: number };
+type Num = string | number;
+interface Analytics {
+  days: number; from: string; to: string; scope: string; currency: string;
+  sales?: { own_only: boolean; revenue: Num; previous_revenue: Num; transactions: number; today: Num; average_sale: Num; refunds: Num; discounts: Num; tax: Num; trend: { date: string; pos: Num; online: Num }[]; payment_methods: Item[]; top_products: (Item & { quantity: number })[]; categories: Item[]; by_hour: Item[]; by_weekday: Item[]; by_branch?: Item[]; by_cashier?: Item[] };
+  orders?: { total: number; open: number; by_status: Item[]; by_fulfilment: Item[]; trend: { date: string; orders: number }[] };
+  inventory?: { products: number; stock_value: Num; unsaleable_value: Num; low_stock: number; out_of_stock: number; near_expiry: number; expired: number; value_by_category: Item[]; expiring_soon: { medicine: string; batch: string; branch: string; expiry: string; quantity: number }[] };
+  prescriptions?: { total: number; waiting: number; by_status: Item[]; trend: { date: string; prescriptions: number }[] };
+  finance?: { monthly: { month: string; revenue: Num; expenses: Num }[]; expense_breakdown: Item[] };
+  customers?: { total: number; new: number; verified: number; trend: { date: string; customers: number }[]; top: (Item & { orders: number })[] };
+  procurement?: { by_status: Item[]; ordered_value: Num; awaiting_approval: number };
+  people?: { staff: number; by_role: Item[]; present_today: number; attendance_today: Item[]; pending_leave: number };
+  engagement?: { appointments: Item[]; open_inquiries: number; average_rating: number | null; ratings: Item[] };
+  delivery?: { own_only: boolean; by_status: Item[]; active: number };
 }
-interface Report { rows: Record<string, string | number>[] }
-interface BatchRow { id: number; batch_number: string; medicine_name?: string; expiry_date: string | null; quantity_available: number }
-interface MedRow { id: number; name: string; strength?: string }
-interface Alerts { low_stock: MedRow[]; out_of_stock: MedRow[]; near_expiry: BatchRow[]; expired: BatchRow[] }
-interface SaleRow { id: number; reference_number: string; status: string; total: string; customer_name: string; created_at: string; cashier_name: string }
+const shortDay = (v: string) => new Date(`${v}T00:00:00`).toLocaleDateString(undefined, { day: "numeric", month: "short" });
+const PERIODS: [number, string][] = [[7, "7 days"], [30, "30 days"], [90, "90 days"], [365, "12 months"]];
+type Row = Record<string, unknown>;
+const asRows = (items: unknown) => items as Row[];
 
-const money = (v: string | number) => Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const iso = (d: Date) => d.toISOString().slice(0, 10);
-const daysAgo = (n: number) => { const d = new Date(); d.setDate(d.getDate() - n); return iso(d); };
-
-function Panel({ title, to, linkLabel, children }: { title: string; to?: string; linkLabel?: string; children: React.ReactNode }) {
+function Section({ title, icon: Icon, to, linkLabel, children }: { title: string; icon: LucideIcon; to?: string; linkLabel?: string; children: ReactNode }) {
   return (
-    <section className="card flex flex-col p-5">
-      <div className="mb-4 flex items-center justify-between gap-3"><h2 className="section-title">{title}</h2>{to && <Link to={to} className="btn-link">{linkLabel ?? "View all"}<ArrowRight size={14} aria-hidden /></Link>}</div>
+    <section className="space-y-4" aria-label={title}>
+      <div className="flex items-center justify-between gap-3"><h2 className="flex items-center gap-2.5 text-lg !font-bold"><span className="grid h-9 w-9 place-items-center rounded-xl bg-teal-50 text-teal-700"><Icon size={18} aria-hidden /></span>{title}</h2>{to && <Link to={to} className="btn-link">{linkLabel ?? "Open"}</Link>}</div>
       {children}
     </section>
   );
 }
-
-/** Daily net sales as columns, using the sales-summary report rows. */
-function SalesChart({ rows }: { rows: { label: string; value: number }[] }) {
-  const max = Math.max(...rows.map((r) => r.value), 1);
-  if (rows.every((r) => r.value === 0)) return <p className="grid h-48 place-items-center text-sm text-muted">No sales in the last 14 days.</p>;
-  return (
-    <div className="flex h-48 items-end gap-1.5" role="img" aria-label={`Net sales by day: ${rows.map((r) => `${r.label} ${money(r.value)}`).join(", ")}`}>
-      {rows.map((r) => (
-        <div key={r.label} className="group flex h-full min-w-0 flex-1 flex-col items-center justify-end gap-1.5">
-          <div className="relative w-full max-w-10 rounded-t-md bg-primary/85 transition-colors group-hover:bg-primary-hover" style={{ height: `${Math.max((r.value / max) * 100, r.value > 0 ? 3 : 0.5)}%` }}>
-            <span className="pointer-events-none absolute -top-7 left-1/2 z-10 hidden -translate-x-1/2 whitespace-nowrap rounded bg-ink px-2 py-0.5 text-[11px] text-white group-hover:block">{money(r.value)}</span>
-          </div>
-          <span className="text-[10px] text-muted">{r.label.slice(8)}</span>
-        </div>))}
-    </div>
-  );
-}
+const Stats = ({ children }: { children: ReactNode }) => <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{children}</div>;
 
 export default function DashboardHome() {
-  const { user } = useAuth(); const { slug } = useParams();
-  const can = (p: string) => !!user?.permissions.includes(p);
-  const base = `/${slug}/admin`;
-  const reports = can("report.view"), stock = can("inventory.view"), sales = can("pos.sell") || can("sales.view_branch");
-  const basic = useQuery({ queryKey: ["tenant-dashboard"], queryFn: () => api<Basic>("/tenants/dashboard/") });
-  const dash = useQuery({ queryKey: ["overview", "home"], queryFn: () => api<Dash>("/reports/dashboard/"), enabled: reports, retry: false });
-  const trend = useQuery({ queryKey: ["report", "home-trend"], queryFn: () => api<Report>(`/reports/sales-summary/?group=day&date_from=${daysAgo(13)}&date_to=${daysAgo(0)}&page_size=31`), enabled: reports, retry: false });
-  const top = useQuery({ queryKey: ["report", "home-top"], queryFn: () => api<Report>(`/reports/sales-by-product/?date_from=${daysAgo(29)}&date_to=${daysAgo(0)}&page_size=5`), enabled: reports, retry: false });
-  const alerts = useQuery({ queryKey: ["alerts"], queryFn: () => api<Alerts>("/inventory/alerts/"), enabled: stock, retry: false });
-  const recent = useQuery({ queryKey: ["sales"], queryFn: () => api<Page<SaleRow>>("/sales/"), enabled: sales, retry: false });
-
-  const byDay = new Map((trend.data?.rows ?? []).map((r) => [String(r.period).slice(0, 10), Number(r.net_sales)]));
-  const days = Array.from({ length: 14 }, (_, i) => daysAgo(13 - i)).map((d) => ({ label: d, value: byDay.get(d) ?? 0 }));
-  const quick: [string, string, LucideIcon, boolean][] = [
-    ["pos", "New sale", Receipt, can("pos.sell")], ["prescriptions", "Prescriptions", ScrollText, can("prescription.view")],
-    ["inventory", "Receive or check stock", Package, stock], ["procurement", "Purchase orders", ShoppingCart, can("procurement.view")],
+  const { slug = "" } = useParams(); const { user, can } = useAuth(); const base = `/${slug}/admin`;
+  const [days, setDays] = useState(30);
+  const q = useQuery({ queryKey: ["analytics", days], queryFn: () => api<Analytics>(`/analytics/?days=${days}`), refetchInterval: 120_000, placeholderData: (p) => p });
+  const hour = new Date().getHours();
+  const actions: [boolean, string, string, LucideIcon][] = [
+    [can("pos.sell"), "pos", "New sale", Receipt], [can("order.manage"), "orders", "Online orders", Package], [can("prescription.view"), "prescriptions", "Prescriptions", ScrollText],
+    [can("inventory.view"), "inventory", "Inventory", Boxes], [can("customer.view"), "customers", "Customers", Users], [can("report.view", "accounting.view"), "reports", "Reports", FileText],
+    [can("delivery.perform"), "deliveries", "My deliveries", Truck], [true, "my-work", "My work", CalendarClock],
   ];
-  const expiring = [...(alerts.data?.expired ?? []).map((b) => ({ ...b, state: "expired" })), ...(alerts.data?.near_expiry ?? []).map((b) => ({ ...b, state: "pending" }))].slice(0, 5);
-  const low = [...(alerts.data?.out_of_stock ?? []).map((m) => ({ ...m, state: "out_of_stock" })), ...(alerts.data?.low_stock ?? []).map((m) => ({ ...m, state: "low_stock" }))].filter((m, i, a) => a.findIndex((x) => x.id === m.id) === i).slice(0, 5);
-
+  const d = q.data;
+  const cur = d?.currency;
+  const m = (v: Num) => money(v, cur);
+  const num = (v: number) => v.toLocaleString();
+  const s = d?.sales;
+  const change = s && Number(s.previous_revenue) > 0 ? ((Number(s.revenue) - Number(s.previous_revenue)) / Number(s.previous_revenue)) * 100 : null;
+  const donut = (title: string, items: Item[], name: string, value: string, format = num, center = "Total") => (
+    <ChartCard title={title} table={itemsTable(name, value, items)}><DonutChart items={items} format={format} centerLabel={center} /></ChartCard>);
+  const bars = (title: string, items: Item[], name: string, value: string, format = num) => (
+    <ChartCard title={title} table={itemsTable(name, value, items)}><RankBars items={items} format={format} /></ChartCard>);
   return (
-    <div className="space-y-6">
-      <PageHeader title={`Welcome, ${user?.full_name ?? ""}`} subtitle={`${new Date().toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long", year: "numeric" })}${basic.data ? ` · ${basic.data.scope === "branch" ? "Your branch" : "All branches"}` : ""}`}
-        actions={can("pos.sell") && <Link to={`${base}/pos`} className="btn btn-primary"><Receipt size={16} aria-hidden />New sale</Link>} />
+    <div className="space-y-8">
+      <section className="hero-surface animate-rise overflow-hidden rounded-3xl p-6 sm:p-8">
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div><p className="text-sm text-white/75">{hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening"},</p><h1 className="mt-1 text-2xl !font-extrabold sm:text-3xl">{user?.full_name}</h1><p className="mt-1 text-sm text-white/75">{user?.role_name ?? words(user?.role)} · {d?.scope === "branch" ? user?.branch_name ?? "Your branch" : "All branches"} · {new Date().toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" })}</p></div>
+          <div role="group" aria-label="Period" className="glass flex flex-wrap gap-1 rounded-2xl p-1">{PERIODS.map(([v, label]) => <button key={v} type="button" aria-pressed={days === v} onClick={() => setDays(v)} className={`rounded-xl px-3 py-1.5 text-sm font-semibold transition ${days === v ? "bg-[#fff]" : "text-white/85 hover:bg-white/10"}`} style={days === v ? { color: "#0b1324" } : undefined}>{label}</button>)}</div>
+        </div>
+        <div className="mt-6 flex flex-wrap gap-2">{actions.filter((a) => a[0]).map(([, to, label, Icon]) => <Link key={to} to={`${base}/${to}`} className="btn glass text-white"><Icon size={16} aria-hidden />{label}</Link>)}</div>
+      </section>
 
-      {reports && (dash.isLoading ? <Loading rows={1} /> : dash.data && (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <StatCard label="Sales today (net)" value={money(dash.data.sales.today)} icon={Wallet} />
-          <StatCard label="Sales this month (net)" value={money(dash.data.sales.month)} icon={TrendingUp} tone="info" />
-          <StatCard label="Inventory value" value={money(dash.data.medicines.inventory_value)} icon={Banknote} tone="navy" hint={`${dash.data.medicines.total} active medicines`} />
-          <StatCard label="Open online orders" value={dash.data.orders.pending} icon={Package} tone="info" />
-        </div>))}
+      {q.isLoading && <Loading rows={6} label="Preparing your analysis…" />}
+      {q.isError && <ErrorState onRetry={() => q.refetch()}>{errorMessage(q.error)}</ErrorState>}
 
-      {stock && alerts.data && (
-        <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
-          <StatCard label="Low stock" value={alerts.data.low_stock.length} icon={AlertTriangle} tone="warning" />
-          <StatCard label="Out of stock" value={alerts.data.out_of_stock.length} icon={PackageX} tone="danger" />
-          <StatCard label="Expiring soon (batches)" value={alerts.data.near_expiry.length} icon={CalendarClock} tone="warning" />
-          <StatCard label="Expired batches" value={alerts.data.expired.length} icon={Pill} tone="danger" />
-        </div>)}
+      {d && s && <Section title={s.own_only ? "My sales" : "Sales performance"} icon={Banknote} to={can("report.view", "accounting.view") ? `${base}/reports` : undefined} linkLabel="Reports">
+        <Stats>
+          <StatCard label="Revenue" value={m(s.revenue)} icon={Banknote} hint={change === null ? "No sales in the previous period" : <span className={`inline-flex items-center gap-1 font-semibold ${change >= 0 ? "text-success" : "text-danger"}`}>{change >= 0 ? <ArrowUpRight size={13} aria-hidden /> : <ArrowDownRight size={13} aria-hidden />}{Math.abs(change).toFixed(1)}% vs previous period</span>} />
+          <StatCard label="Sales today" value={m(s.today)} icon={Wallet} tone="info" />
+          <StatCard label="Transactions" value={num(s.transactions)} icon={ShoppingCart} tone="navy" hint={`Average ${m(s.average_sale)}`} />
+          <StatCard label="Refunds" value={m(s.refunds)} icon={RotateCcw} tone="warning" hint={`Discounts ${m(s.discounts)} · Tax ${m(s.tax)}`} />
+        </Stats>
+        <div className="grid gap-5 xl:grid-cols-3">
+          <ChartCard className="xl:col-span-2" title="Revenue trend" subtitle={`${shortDay(d.from)} – ${shortDay(d.to)}`} legend={s.own_only ? undefined : [{ label: "In store", color: "var(--series-1)" }, { label: "Online", color: "var(--series-2)" }]}
+            table={{ head: ["Date", "In store", "Online"], rows: s.trend.map((r) => [shortDay(r.date), Number(r.pos), Number(r.online)]) }}>
+            <TrendChart rows={s.trend} x="date" xLabel={shortDay} format={m} height={280} series={s.own_only ? [{ key: "pos", label: "My sales" }] : [{ key: "pos", label: "In store" }, { key: "online", label: "Online" }]} />
+          </ChartCard>
+          {donut("Payment methods", s.payment_methods, "Method", "Amount", m, "Taken")}
+          {bars("Top products", s.top_products.map((p) => ({ ...p, note: `${p.quantity} sold` })), "Product", "Revenue", m)}
+          {donut("Sales by category", s.categories, "Category", "Revenue", m, "Revenue")}
+          {s.by_branch ? bars("Sales by branch", s.by_branch, "Branch", "Revenue", m) : s.by_cashier && bars("Sales by cashier", s.by_cashier, "Cashier", "Revenue", m)}
+          <ChartCard className="xl:col-span-2" title="Busiest hours" subtitle="Number of counter sales by hour of day" table={itemsTable("Hour", "Sales", s.by_hour)}><TrendChart kind="column" rows={asRows(s.by_hour)} x="label" series={[{ key: "value", label: "Sales" }]} /></ChartCard>
+          <ChartCard title="Day of the week" table={itemsTable("Day", "Revenue", s.by_weekday)}><TrendChart kind="column" rows={asRows(s.by_weekday)} x="label" series={[{ key: "value", label: "Revenue" }]} format={m} /></ChartCard>
+          {s.by_branch && s.by_cashier && <div className="xl:col-span-3">{bars("Sales by cashier", s.by_cashier, "Cashier", "Revenue", m)}</div>}
+        </div>
+      </Section>}
 
-      {basic.isLoading && <Loading />}
-      {basic.isError && <ErrorState onRetry={() => basic.refetch()}>The dashboard could not be loaded.</ErrorState>}
+      {d?.finance && <Section title="Finance" icon={Wallet} to={`${base}/accounting`} linkLabel="Accounting">
+        <div className="grid gap-5 xl:grid-cols-3">
+          <ChartCard className="xl:col-span-2" title="Revenue and expenses by month" subtitle="From the accounting ledger" legend={[{ label: "Revenue", color: "var(--series-1)" }, { label: "Expenses", color: "var(--series-2)" }]} table={{ head: ["Month", "Revenue", "Expenses"], rows: d.finance.monthly.map((r) => [r.month, Number(r.revenue), Number(r.expenses)]) }}>
+            <TrendChart rows={d.finance.monthly} x="month" format={m} series={[{ key: "revenue", label: "Revenue" }, { key: "expenses", label: "Expenses" }]} />
+          </ChartCard>
+          {donut("Expense breakdown", d.finance.expense_breakdown, "Category", "Amount", m, "Spent")}
+        </div>
+      </Section>}
 
-      {reports && (
-        <div className="grid gap-4 lg:grid-cols-3">
-          <div className="lg:col-span-2"><Panel title="Net sales · last 14 days" to={`${base}/overview`} linkLabel="Business overview">{trend.isLoading ? <div className="skeleton h-48" /> : trend.isError ? <p className="text-sm text-muted">The sales chart could not be loaded.</p> : <SalesChart rows={days} />}</Panel></div>
-          <Panel title="Top-selling · 30 days" to={`${base}/reports`} linkLabel="Reports">
-            <BarList empty="No sales in the last 30 days." items={(top.data?.rows ?? []).slice(0, 5).map((r) => ({ label: String(r.product), value: Number(r.quantity), note: money(r.revenue) }))} />
-          </Panel>
-        </div>)}
+      {d?.orders && <Section title="Online orders" icon={Package} to={`${base}/orders`} linkLabel="Manage orders">
+        <div className="grid gap-4 sm:grid-cols-2"><StatCard label="Orders in period" value={num(d.orders.total)} icon={Package} to={`${base}/orders`} /><StatCard label="Open orders" value={num(d.orders.open)} icon={ClipboardList} tone="warning" to={`${base}/orders`} /></div>
+        <div className="grid gap-5 xl:grid-cols-3">
+          <ChartCard title="Orders per day" table={{ head: ["Date", "Orders"], rows: d.orders.trend.map((r) => [shortDay(r.date), r.orders]) }}><TrendChart kind="column" rows={d.orders.trend} x="date" xLabel={shortDay} series={[{ key: "orders", label: "Orders" }]} /></ChartCard>
+          {donut("Order status", d.orders.by_status, "Status", "Orders", num, "Orders")}
+          {donut("Pickup and delivery", d.orders.by_fulfilment, "Type", "Orders", num, "Orders")}
+        </div>
+      </Section>}
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        {stock && <Panel title="Stock needing attention" to={`${base}/inventory`}>
-          {low.length === 0 ? <p className="py-6 text-center text-sm text-muted">No low or out-of-stock medicines.</p> : <ul className="divide-y divide-slate-100">{low.map((m) => <li key={m.id} className="flex items-center justify-between gap-3 py-2.5 text-sm"><span className="truncate font-medium">{m.name} <span className="font-normal text-muted">{m.strength}</span></span><StatusBadge status={m.state} /></li>)}</ul>}
-        </Panel>}
-        {stock && <Panel title="Expiry watch" to={`${base}/inventory`}>
-          {expiring.length === 0 ? <p className="py-6 text-center text-sm text-muted">No expired or soon-to-expire batches.</p> : <ul className="divide-y divide-slate-100">{expiring.map((b) => <li key={b.id} className="flex items-center justify-between gap-3 py-2.5 text-sm"><span className="min-w-0 truncate"><span className="font-medium">{b.medicine_name ?? "Batch"}</span> <span className="text-muted">· {b.batch_number} · {b.quantity_available} units</span></span><StatusBadge status={b.state === "expired" ? "expired" : `exp ${b.expiry_date}`} tone={b.state === "expired" ? "danger" : "warning"} /></li>)}</ul>}
-        </Panel>}
-      </div>
+      {d?.inventory && <Section title="Inventory health" icon={Boxes} to={`${base}/inventory`} linkLabel="Open inventory">
+        <Stats>
+          <StatCard label="Stock value" value={m(d.inventory.stock_value)} icon={Boxes} hint={`${d.inventory.products} active medicines · ${m(d.inventory.unsaleable_value)} unsaleable`} />
+          <StatCard label="Low stock" value={d.inventory.low_stock} icon={PackageMinus} tone="warning" to={`${base}/inventory`} />
+          <StatCard label="Out of stock" value={d.inventory.out_of_stock} icon={Pill} tone="danger" to={`${base}/inventory`} />
+          <StatCard label="Expiring / expired" value={`${d.inventory.near_expiry} / ${d.inventory.expired}`} icon={AlertTriangle} tone="danger" to={`${base}/inventory`} />
+        </Stats>
+        <div className="grid gap-5 xl:grid-cols-2">
+          {bars("Stock value by category", d.inventory.value_by_category, "Category", "Value", m)}
+          <ChartCard title="Expiring soon" subtitle="Sell or return these first">
+            {d.inventory.expiring_soon.length === 0 ? <p className="py-8 text-center text-sm text-muted">Nothing is close to expiry.</p> : <ul className="divide-y divide-line">{d.inventory.expiring_soon.map((b) => <li key={`${b.medicine}-${b.batch}-${b.branch}`} className="flex items-center justify-between gap-3 py-2.5 text-sm"><span className="min-w-0"><b className="block truncate">{b.medicine}</b><span className="text-xs text-muted">Batch {b.batch} · {b.branch} · {b.quantity} units</span></span><span className="badge badge-warning">{day(b.expiry)}</span></li>)}</ul>}
+          </ChartCard>
+        </div>
+      </Section>}
 
-      {sales && <Panel title="Recent transactions" to={`${base}/pos`}>
-        {recent.isLoading ? <div className="skeleton h-24" /> : !recent.data?.results.length ? <EmptyState>No sales yet.</EmptyState> : (
-          <div className="relative -mx-5 -mb-5 overflow-x-auto"><table className="table"><thead><tr><th>Reference</th><th>When</th><th>Cashier</th><th>Customer</th><th className="!text-right">Total</th><th>Status</th></tr></thead>
-            <tbody>{recent.data.results.slice(0, 6).map((s) => <tr key={s.id}><td className="font-semibold">{s.reference_number}</td><td className="whitespace-nowrap">{new Date(s.created_at).toLocaleString()}</td><td>{s.cashier_name}</td><td>{s.customer_name || "—"}</td><td className="text-right font-semibold tabular-nums">{money(s.total)}</td><td><StatusBadge status={s.status} /></td></tr>)}</tbody></table></div>)}
-      </Panel>}
+      {d?.prescriptions && <Section title="Prescriptions" icon={ScrollText} to={`${base}/prescriptions`} linkLabel="Open register">
+        <div className="grid gap-4 sm:grid-cols-2"><StatCard label="Received in period" value={d.prescriptions.total} icon={ScrollText} /><StatCard label="Waiting for review" value={d.prescriptions.waiting} icon={ClipboardList} tone="warning" to={`${base}/prescriptions`} /></div>
+        <div className="grid gap-5 xl:grid-cols-3"><ChartCard className="xl:col-span-2" title="Prescriptions per day" table={{ head: ["Date", "Prescriptions"], rows: d.prescriptions.trend.map((r) => [shortDay(r.date), r.prescriptions]) }}><TrendChart kind="column" rows={d.prescriptions.trend} x="date" xLabel={shortDay} series={[{ key: "prescriptions", label: "Prescriptions" }]} /></ChartCard>{donut("Prescription status", d.prescriptions.by_status, "Status", "Count")}</div>
+      </Section>}
 
-      {basic.data && (
-        <div className="grid gap-4 lg:grid-cols-3">
-          <div className="grid grid-cols-2 gap-4 lg:col-span-2">
-            <StatCard label="Branches" value={basic.data.branches} icon={Building2} tone="navy" />
-            <StatCard label="Employees" value={basic.data.employees} icon={Users} tone="navy" />
-            <StatCard label="Pharmacists" value={basic.data.pharmacists} icon={Stethoscope} />
-            {basic.data.customers !== null && <StatCard label="Customers" value={basic.data.customers} icon={Users} tone="info" />}
-          </div>
-          <Panel title="Staff by role"><BarList empty="No staff yet." items={basic.data.staff_by_role.map((r) => ({ label: r.role__name ?? "No role", value: r.n }))} /></Panel>
-        </div>)}
+      {d?.customers && <Section title="Customers" icon={Users} to={`${base}/customers`} linkLabel="All customers">
+        <div className="grid gap-4 sm:grid-cols-3"><StatCard label="Registered customers" value={num(d.customers.total)} icon={Users} to={`${base}/customers`} /><StatCard label="New in period" value={num(d.customers.new)} icon={UserPlus} tone="info" /><StatCard label="Verified" value={num(d.customers.verified)} icon={HeartHandshake} tone="navy" /></div>
+        <div className="grid gap-5 xl:grid-cols-3"><ChartCard className="xl:col-span-2" title="New registrations" table={{ head: ["Date", "Customers"], rows: d.customers.trend.map((r) => [shortDay(r.date), r.customers]) }}><TrendChart rows={d.customers.trend} x="date" xLabel={shortDay} series={[{ key: "customers", label: "New customers" }]} /></ChartCard>{bars("Top online customers", d.customers.top.map((c) => ({ ...c, note: `${c.orders} orders` })), "Customer", "Spent", m)}</div>
+      </Section>}
 
-      {quick.some((q) => q[3]) && (
-        <section aria-label="Quick actions" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          {quick.filter((q) => q[3]).map(([to, label, Icon]) => <Link key={to} to={`${base}/${to}`} className="card flex items-center gap-3 p-4 text-sm font-semibold transition hover:border-primary hover:shadow-md"><span className="grid h-10 w-10 place-items-center rounded-lg bg-teal-50 text-teal-700"><Icon size={19} aria-hidden /></span><span className="flex-1">{label}</span><ArrowRight size={16} aria-hidden className="text-slate-400" /></Link>)}
-        </section>)}
+      {d?.procurement && <Section title="Procurement" icon={ShoppingCart} to={`${base}/procurement`}>
+        <div className="grid gap-4 sm:grid-cols-2"><StatCard label="Ordered in period" value={m(d.procurement.ordered_value)} icon={ShoppingCart} /><StatCard label="Awaiting approval" value={d.procurement.awaiting_approval} icon={ClipboardList} tone="warning" /></div>
+        {donut("Purchase orders by status", d.procurement.by_status, "Status", "Orders")}
+      </Section>}
+
+      {d?.people && <Section title="Team" icon={Users} to={`${base}/hr`}>
+        <div className="grid gap-4 sm:grid-cols-3"><StatCard label="Active staff" value={d.people.staff} icon={Users} /><StatCard label="Clocked in today" value={d.people.present_today} icon={CalendarClock} tone="info" /><StatCard label="Leave awaiting approval" value={d.people.pending_leave} icon={ClipboardList} tone="warning" /></div>
+        <div className="grid gap-5 xl:grid-cols-2">{bars("Staff by role", d.people.by_role, "Role", "Staff")}{donut("Attendance today", d.people.attendance_today, "Status", "Staff")}</div>
+      </Section>}
+
+      {d?.engagement && <Section title="Customer care" icon={HeartHandshake} to={`${base}/engagement`}>
+        <div className="grid gap-4 sm:grid-cols-2"><StatCard label="Average rating" value={d.engagement.average_rating ? `${d.engagement.average_rating.toFixed(1)} / 5` : "—"} icon={Star} tone="warning" /><StatCard label="Open enquiries" value={d.engagement.open_inquiries} icon={HeartHandshake} tone="info" /></div>
+        <div className="grid gap-5 xl:grid-cols-2">{bars("Ratings", d.engagement.ratings, "Rating", "Reviews")}{donut("Appointments", d.engagement.appointments, "Status", "Appointments")}</div>
+      </Section>}
+
+      {d?.delivery && <Section title={d.delivery.own_only ? "My deliveries" : "Deliveries"} icon={Truck} to={`${base}/deliveries`}>
+        <div className="grid gap-5 xl:grid-cols-2"><StatCard label="Active deliveries" value={d.delivery.active} icon={Truck} to={`${base}/deliveries`} />{donut("Delivery status", d.delivery.by_status, "Status", "Deliveries")}</div>
+      </Section>}
     </div>
   );
 }

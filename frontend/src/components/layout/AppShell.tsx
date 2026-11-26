@@ -1,29 +1,25 @@
-/** Application shell shared by the pharmacy staff area and the platform administration: collapsible grouped sidebar,
- *  mobile drawer, top bar with breadcrumb, module quick-search, notifications slot and user menu. Presentational only. */
-import { Bell, ChevronDown, ChevronRight, KeyRound, LogOut, Menu, PanelLeftClose, PanelLeftOpen, Search, X, type LucideIcon } from "lucide-react";
-import { Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+/** Application shell shared by every signed-in area (platform, pharmacy staff and customers): grouped sidebar with the signed-in
+ *  person at the bottom, top bar with page search, theme switch, live notifications and the account menu. */
+import { ChevronRight, LogOut, Menu, Moon, Search, Settings, Sun, X, type LucideIcon } from "lucide-react";
+import { Suspense, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
-import { Loading } from "../ui";
+import { useAuth } from "../../lib/auth";
+import { readableOn } from "../../lib/format";
+import { useRealtime } from "../../lib/realtime";
+import { useTheme } from "../../lib/theme";
+import { BrandProvider, Loading, type Brand } from "../brand/Brand";
+import { Avatar } from "../ui";
 import { PageBoundary } from "../ui/PageBoundary";
+import { NotificationBell } from "./NotificationBell";
+import { useDismiss } from "./useDismiss";
 
-export interface NavItem { to: string; label: string; icon: LucideIcon; keywords?: string }
+export interface NavItem { to: string; label: string; icon: LucideIcon; keywords?: string; badge?: number }
 export interface NavGroup { label: string; items: NavItem[] }
-export interface Notification { id: string; label: string; count: number; to: string; tone: "warning" | "danger" | "info" }
 
-const COLLAPSE_KEY = "nts.sidebar.collapsed";
-const readCollapsed = () => { try { return localStorage.getItem(COLLAPSE_KEY) === "1"; } catch { return false; } };
-
-function useDismiss(open: boolean, close: () => void) {
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const down = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) close(); };
-    const key = (e: KeyboardEvent) => e.key === "Escape" && close();
-    document.addEventListener("mousedown", down);
-    document.addEventListener("keydown", key);
-    return () => { document.removeEventListener("mousedown", down); document.removeEventListener("keydown", key); };
-  }, [open, close]);
-  return ref;
+export function ThemeToggle({ className = "icon-btn" }: { className?: string }) {
+  const { theme, toggle } = useTheme();
+  const dark = theme === "dark";
+  return <button type="button" onClick={toggle} className={className} aria-label={dark ? "Switch to light mode" : "Switch to dark mode"} title={dark ? "Light mode" : "Dark mode"}>{dark ? <Sun size={19} aria-hidden /> : <Moon size={19} aria-hidden />}</button>;
 }
 
 function QuickSearch({ items }: { items: (NavItem & { group: string })[] }) {
@@ -39,17 +35,17 @@ function QuickSearch({ items }: { items: (NavItem & { group: string })[] }) {
   }, []);
   const go = (to: string) => { setOpen(false); setQ(""); input.current?.blur(); nav(to); };
   return (
-    <div ref={ref} className="relative hidden w-72 lg:block">
+    <div ref={ref} className="relative hidden w-72 xl:block">
       <Search size={16} aria-hidden className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-      <input ref={input} role="combobox" aria-expanded={open} aria-controls="quick-results" aria-label="Search pages" placeholder="Search pages…  (Ctrl+K)" value={q}
-        className="w-full pl-9 pr-3" onFocus={() => setOpen(true)} onChange={(e) => { setQ(e.target.value); setAt(0); setOpen(true); }}
+      <input ref={input} role="combobox" aria-expanded={open} aria-controls="quick-results" aria-label="Search pages" placeholder="Enter your page search (Ctrl+K)" value={q}
+        className="w-full !pl-9" onFocus={() => setOpen(true)} onChange={(e) => { setQ(e.target.value); setAt(0); setOpen(true); }}
         onKeyDown={(e) => {
           if (e.key === "ArrowDown") { e.preventDefault(); setAt((a) => Math.min(a + 1, found.length - 1)); }
           if (e.key === "ArrowUp") { e.preventDefault(); setAt((a) => Math.max(a - 1, 0)); }
           if (e.key === "Enter" && found[at]) go(found[at].to);
         }} />
       {open && (
-        <ul id="quick-results" role="listbox" className="animate-pop absolute right-0 top-11 z-50 max-h-80 w-full overflow-y-auto rounded-xl border border-line bg-white p-1.5 shadow-pop">
+        <ul id="quick-results" role="listbox" className="popover animate-pop absolute right-0 top-12 z-50 max-h-80 w-full overflow-y-auto p-1.5">
           {found.length === 0 && <li className="p-3 text-sm text-muted">No matching pages.</li>}
           {found.map((i, n) => (
             <li key={i.to} role="option" aria-selected={n === at}>
@@ -62,143 +58,133 @@ function QuickSearch({ items }: { items: (NavItem & { group: string })[] }) {
   );
 }
 
-function NotificationMenu({ items }: { items: Notification[] }) {
+function UserMenu({ settingsTo, onSignOut }: { settingsTo: string; onSignOut: () => void }) {
+  const { user } = useAuth();
   const [open, setOpen] = useState(false);
   const ref = useDismiss(open, () => setOpen(false));
-  const live = items.filter((i) => i.count > 0);
-  const total = live.reduce((t, i) => t + i.count, 0);
-  const dot = { warning: "bg-warning", danger: "bg-danger", info: "bg-info" };
+  if (!user) return null;
+  const item = "flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm font-medium";
   return (
     <div ref={ref} className="relative">
-      <button type="button" onClick={() => setOpen((o) => !o)} aria-haspopup="true" aria-expanded={open} aria-label={`Alerts: ${total}`} className="relative grid h-10 w-10 place-items-center rounded-lg text-slate-600 hover:bg-slate-100">
-        <Bell size={19} aria-hidden />
-        {total > 0 && <span className="absolute right-1 top-1 grid h-4 min-w-4 place-items-center rounded-full bg-danger px-1 text-[10px] font-bold text-white">{total > 99 ? "99+" : total}</span>}
+      <button type="button" onClick={() => setOpen((o) => !o)} aria-haspopup="menu" aria-expanded={open} aria-label="Account menu" className="block rounded-full ring-offset-2 transition hover:scale-105">
+        <Avatar src={user.avatar} name={user.full_name} size={40} />
       </button>
       {open && (
-        <div className="animate-pop absolute right-0 top-12 z-50 w-72 rounded-xl border border-line bg-white p-1.5 shadow-pop">
-          <p className="px-2.5 py-2 text-xs font-semibold uppercase tracking-wide text-muted">Alerts</p>
-          {live.length === 0 && <p className="px-2.5 pb-3 text-sm text-muted">You are all caught up.</p>}
-          {live.map((i) => (
-            <Link key={i.id} to={i.to} onClick={() => setOpen(false)} className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm hover:bg-slate-50">
-              <span className={`h-2 w-2 rounded-full ${dot[i.tone]}`} aria-hidden /><span className="flex-1">{i.label}</span><span className="font-semibold tabular-nums">{i.count}</span>
-            </Link>))}
+        <div role="menu" className="popover animate-pop absolute right-0 top-12 z-50 w-48 p-1.5">
+          <Link role="menuitem" to={settingsTo} onClick={() => setOpen(false)} className={`${item} hover:bg-slate-100`}><Settings size={16} aria-hidden />Settings</Link>
+          <button role="menuitem" type="button" onClick={() => { setOpen(false); onSignOut(); }} className={`${item} text-red-700 hover:bg-red-50`}><LogOut size={16} aria-hidden />Logout</button>
         </div>)}
     </div>
   );
 }
 
-const initials = (name: string) => name.split(/\s+/).filter(Boolean).slice(0, 2).map((p) => p[0].toUpperCase()).join("") || "U";
-
-function UserMenu({ name, role, onSignOut }: { name: string; role: string; onSignOut: () => void }) {
-  const [open, setOpen] = useState(false);
-  const ref = useDismiss(open, () => setOpen(false));
+function SidebarNav({ groups, label }: { groups: NavGroup[]; label: string }) {
   return (
-    <div ref={ref} className="relative">
-      <button type="button" onClick={() => setOpen((o) => !o)} aria-haspopup="menu" aria-expanded={open} className="flex items-center gap-2.5 rounded-lg py-1 pl-1 pr-2 hover:bg-slate-100">
-        <span className="grid h-9 w-9 place-items-center rounded-full bg-navy text-xs font-bold text-white">{initials(name)}</span>
-        <span className="hidden text-left leading-tight md:block"><span className="block max-w-40 truncate text-sm font-semibold">{name}</span><span className="block text-xs capitalize text-muted">{role.replace(/_/g, " ")}</span></span>
-        <ChevronDown size={15} aria-hidden className="text-slate-400" />
-      </button>
-      {open && (
-        <div role="menu" className="animate-pop absolute right-0 top-12 z-50 w-60 rounded-xl border border-line bg-white p-1.5 shadow-pop">
-          <div className="border-b border-line px-2.5 pb-2 pt-1"><p className="truncate text-sm font-semibold">{name}</p><p className="text-xs capitalize text-muted">{role.replace(/_/g, " ")}</p></div>
-          <Link role="menuitem" to="/change-password" onClick={() => setOpen(false)} className="mt-1 flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm hover:bg-slate-50"><KeyRound size={16} aria-hidden />Change password</Link>
-          <button role="menuitem" type="button" onClick={onSignOut} className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-red-700 hover:bg-red-50"><LogOut size={16} aria-hidden />Sign out</button>
-        </div>)}
-    </div>
-  );
-}
-
-function SidebarNav({ groups, collapsed, label }: { groups: NavGroup[]; collapsed: boolean; label: string }) {
-  const [closed, setClosed] = useState<string[]>([]);
-  return (
-    <nav aria-label={label} className="flex-1 space-y-4 overflow-y-auto px-3 py-4">
-      {groups.map((g) => {
-        const isOpen = collapsed || !closed.includes(g.label);
-        return (
-          <div key={g.label}>
-            {collapsed ? <div className="mx-2 mb-2 border-t border-white/10" /> : (
-              <button type="button" aria-expanded={isOpen} onClick={() => setClosed((c) => (isOpen ? [...c, g.label] : c.filter((x) => x !== g.label)))}
-                className="mb-1 flex w-full items-center justify-between rounded px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400 hover:text-slate-200">
-                {g.label}{isOpen ? <ChevronDown size={13} aria-hidden /> : <ChevronRight size={13} aria-hidden />}
-              </button>)}
-            {isOpen && (
-              <ul className="space-y-0.5">
-                {g.items.map(({ to, label: text, icon: Icon }) => (
-                  <li key={to}>
-                    <NavLink to={to} title={collapsed ? text : undefined} className={({ isActive }) => `flex items-center gap-3 rounded-lg px-2.5 py-2 text-sm font-medium transition-colors ${collapsed ? "justify-center" : ""} ${isActive ? "bg-primary text-white" : "text-slate-300 hover:bg-white/10 hover:text-white"}`}>
-                      <Icon size={18} aria-hidden className="shrink-0" /><span className={collapsed ? "sr-only" : "truncate"}>{text}</span>
-                    </NavLink>
-                  </li>))}
-              </ul>)}
-          </div>);
-      })}
+    <nav aria-label={label} className="flex-1 space-y-5 overflow-y-auto px-3 py-4">
+      {groups.map((g) => (
+        <div key={g.label}>
+          <p className="mb-1.5 px-3 text-[11px] font-bold uppercase tracking-[0.12em] text-[#7f98ae]">{g.label}</p>
+          <ul className="space-y-0.5">
+            {g.items.map(({ to, label: text, icon: Icon, badge }) => (
+              <li key={to}>
+                <NavLink to={to} className={({ isActive }) => `side-link ${isActive ? "side-link-active" : ""}`}>
+                  <Icon size={18} aria-hidden className="shrink-0" /><span className="flex-1 truncate">{text}</span>
+                  {!!badge && <span className="rounded-full bg-white/20 px-1.5 text-[11px] font-bold">{badge}</span>}
+                </NavLink>
+              </li>))}
+          </ul>
+        </div>))}
     </nav>
   );
 }
 
-export function AppShell({ groups, brandName, brandCaption, logo, user, onSignOut, notifications, navLabel, children }: {
-  groups: NavGroup[]; brandName: string; brandCaption: string; logo?: string | null; navLabel: string;
-  user: { name: string; role: string }; onSignOut: () => void; notifications?: Notification[]; children: ReactNode;
+function SidebarUser({ roleLabel, settingsTo }: { roleLabel: string; settingsTo: string }) {
+  const { user } = useAuth();
+  if (!user) return null;
+  return (
+    <Link to={settingsTo} className="m-3 flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.06] p-3 transition hover:bg-white/[0.12]" aria-label="Your account settings">
+      <Avatar src={user.avatar} name={user.full_name} size={44} />
+      <span className="min-w-0 leading-tight">
+        <span className="block truncate text-sm font-bold text-white">{user.full_name}</span>
+        <span className="block truncate text-xs text-[#a9bfd1]" title={user.email}>{user.email}</span>
+        <span className="mt-1 inline-block max-w-full truncate rounded-full bg-white/10 px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-wide text-[#e3eef7]">{roleLabel}</span>
+      </span>
+    </Link>
+  );
+}
+
+export function AppShell({ groups, brand, brandCaption, base, navLabel, roleLabel, headerActions, children }: {
+  groups: NavGroup[]; brand: Brand; brandCaption: string; base: string; navLabel: string; roleLabel: string; headerActions?: ReactNode; children: ReactNode;
 }) {
-  const [collapsed, setCollapsed] = useState(readCollapsed);
+  const { signOut } = useAuth();
   const [drawer, setDrawer] = useState(false);
   const { pathname } = useLocation();
+  useRealtime(true);
   const flat = useMemo(() => groups.flatMap((g) => g.items.map((i) => ({ ...i, group: g.label }))), [groups]);
   const current = [...flat].sort((a, b) => b.to.length - a.to.length).find((i) => pathname === i.to || pathname.startsWith(i.to + "/"));
+  const extra = pathname.startsWith(`${base}/notifications`) ? "Notifications" : pathname.startsWith(`${base}/settings`) ? "Settings" : undefined;
+  const title = current?.label ?? extra ?? brand.name;
   useEffect(() => { setDrawer(false); window.scrollTo(0, 0); }, [pathname]);
-  useEffect(() => { if (current) document.title = `${current.label} · ${brandName} | NTS Pharmacy System`; }, [current, brandName]);
+  useEffect(() => { document.title = `${title} · ${brand.name}`; return () => { document.title = "NTS Pharmacy System"; }; }, [title, brand.name]);
   useEffect(() => {
     if (!drawer) return;
     const key = (e: KeyboardEvent) => e.key === "Escape" && setDrawer(false);
     document.addEventListener("keydown", key);
     return () => document.removeEventListener("keydown", key);
   }, [drawer]);
-  const toggle = () => setCollapsed((c) => { try { localStorage.setItem(COLLAPSE_KEY, c ? "0" : "1"); } catch { /* storage blocked */ } return !c; });
+  // The chosen brand colour drives buttons, tabs and highlights; it is set on <html> so dialogs (portals) share it.
+  useEffect(() => {
+    const root = document.documentElement.style;
+    root.setProperty("--brand", brand.color); root.setProperty("--brand-2", brand.color2); root.setProperty("--on-brand", readableOn(brand.color));
+    return () => { ["--brand", "--brand-2", "--on-brand"].forEach((p) => root.removeProperty(p)); };
+  }, [brand.color, brand.color2]);
+  const leave = () => signOut({ brand });
+  const settingsTo = `${base}/settings`;
 
-  const brand = (mini: boolean) => (
-    <div className={`flex h-16 shrink-0 items-center gap-3 border-b border-white/10 px-4 ${mini ? "justify-center px-2" : ""}`}>
-      <img src={logo || "/logo.webp"} alt="" className="h-10 w-10 shrink-0 rounded-xl bg-white object-contain p-1" />
-      {!mini && <div className="min-w-0"><p className="truncate text-sm font-bold text-white">{brandName}</p><p className="truncate text-xs text-slate-400">{brandCaption}</p></div>}
-    </div>
+  const sidebar = (mobile: boolean) => (
+    <>
+      <Link to={`${base}/dashboard`} className="flex h-[4.5rem] shrink-0 items-center gap-3 border-b border-white/10 px-4">
+        {brand.logo ? <img src={brand.logo} alt="" className="h-11 w-11 shrink-0 rounded-xl bg-[#fff] object-contain p-1" /> : <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-[#fff] text-lg font-black" style={{ color: "#0b1324" }}>{brand.name[0]}</span>}
+        <span className="min-w-0"><span className="block truncate text-sm font-bold text-white">{brand.name}</span><span className="block truncate text-xs text-[#93abc0]">{brandCaption}</span></span>
+      </Link>
+      <SidebarNav groups={groups} label={mobile ? `${navLabel} (mobile)` : navLabel} />
+      <SidebarUser roleLabel={roleLabel} settingsTo={settingsTo} />
+    </>
   );
 
   return (
-    <div className="min-h-screen bg-canvas">
-      <a href="#app-main" className="sr-only focus:not-sr-only focus:fixed focus:left-2 focus:top-2 focus:z-[100] focus:rounded focus:bg-white focus:p-2">Skip to content</a>
-      <aside className={`no-print fixed inset-y-0 left-0 z-40 hidden flex-col bg-navy transition-[width] duration-200 md:flex ${collapsed ? "w-[76px]" : "w-64"}`}>
-        {brand(collapsed)}
-        <SidebarNav groups={groups} collapsed={collapsed} label={navLabel} />
-        <button type="button" onClick={toggle} aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"} className="flex items-center justify-center gap-2 border-t border-white/10 py-3 text-xs font-medium text-slate-400 hover:text-white">
-          {collapsed ? <PanelLeftOpen size={17} aria-hidden /> : <><PanelLeftClose size={17} aria-hidden />Collapse</>}
-        </button>
-      </aside>
-
-      {drawer && (
-        <div className="no-print fixed inset-0 z-[60] md:hidden">
-          <div className="animate-fade absolute inset-0 bg-slate-900/60" onClick={() => setDrawer(false)} />
-          <aside role="dialog" aria-modal="true" aria-label="Menu" className="animate-pop absolute inset-y-0 left-0 flex w-72 max-w-[85vw] flex-col bg-navy">
-            <button type="button" autoFocus onClick={() => setDrawer(false)} aria-label="Close menu" className="absolute right-2 top-4 rounded-lg p-1.5 text-slate-300 hover:bg-white/10"><X size={18} /></button>
-            {brand(false)}
-            <SidebarNav groups={groups} collapsed={false} label={`${navLabel} (mobile)`} />
-          </aside>
-        </div>)}
-
-      <div className={`flex min-h-screen min-w-0 flex-col transition-[padding] duration-200 ${collapsed ? "md:pl-[76px]" : "md:pl-64"}`}>
-        <header className="no-print sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-line bg-white/95 px-4 backdrop-blur sm:px-6">
-          <button type="button" onClick={() => setDrawer(true)} aria-label="Open menu" className="grid h-10 w-10 place-items-center rounded-lg text-slate-600 hover:bg-slate-100 md:hidden"><Menu size={20} /></button>
-          <div className="min-w-0 flex-1">
-            <nav aria-label="Breadcrumb"><ol className="flex items-center gap-1 text-xs text-muted"><li className="hidden truncate sm:block">{brandName}</li>{current && <><li aria-hidden className="hidden sm:block"><ChevronRight size={12} /></li><li className="truncate">{current.group}</li></>}</ol></nav>
-            <p className="truncate text-sm font-semibold">{current?.label ?? brandName}</p>
-          </div>
-          <QuickSearch items={flat} />
-          {notifications && <NotificationMenu items={notifications} />}
-          <UserMenu name={user.name} role={user.role} onSignOut={onSignOut} />
-        </header>
-        <main id="app-main" className="mx-auto w-full max-w-[1440px] flex-1 p-4 sm:p-6 lg:p-8">
-          <PageBoundary key={pathname}><Suspense fallback={<Loading />}>{children}</Suspense></PageBoundary>
-        </main>
+    <BrandProvider brand={brand}>
+      <div className="min-h-screen bg-canvas" style={{ "--brand": brand.color } as CSSProperties}>
+        <a href="#app-main" className="sr-only focus:not-sr-only focus:fixed focus:left-2 focus:top-2 focus:z-[100] focus:rounded focus:bg-white focus:p-2">Skip to content</a>
+        <aside className="side no-print fixed inset-y-0 left-0 z-40 hidden w-64 flex-col lg:flex">{sidebar(false)}</aside>
+        {drawer && (
+          <div className="no-print fixed inset-0 z-[60] lg:hidden">
+            <div className="backdrop animate-fade absolute inset-0" onClick={() => setDrawer(false)} />
+            <aside role="dialog" aria-modal="true" aria-label="Menu" className="side animate-drawer absolute inset-y-0 left-0 flex w-72 max-w-[85vw] flex-col">
+              <button type="button" autoFocus onClick={() => setDrawer(false)} aria-label="Close menu" className="absolute right-2 top-5 z-10 rounded-lg p-1.5 text-white/80 hover:bg-white/10"><X size={18} /></button>
+              {sidebar(true)}
+            </aside>
+          </div>)}
+        <div className="flex min-h-screen min-w-0 flex-col lg:pl-64">
+          <header className="topbar no-print sticky top-0 z-30 h-[4.5rem]">
+            <div className="mx-auto flex h-full w-[94%] items-center gap-2 sm:w-[90%] sm:gap-3">
+              <button type="button" onClick={() => setDrawer(true)} aria-label="Open menu" className="icon-btn lg:hidden"><Menu size={20} /></button>
+              <div className="min-w-0 flex-1">
+                <nav aria-label="Breadcrumb"><ol className="flex items-center gap-1 text-xs text-muted"><li className="hidden truncate sm:block">{brand.name}</li>{current && <><li aria-hidden className="hidden sm:block"><ChevronRight size={12} /></li><li className="hidden truncate sm:block">{current.group}</li></>}</ol></nav>
+                <p className="truncate text-[0.95rem] font-bold">{title}</p>
+              </div>
+              <QuickSearch items={flat} />
+              {headerActions}
+              <ThemeToggle />
+              <NotificationBell base={base} />
+              <UserMenu settingsTo={settingsTo} onSignOut={leave} />
+            </div>
+          </header>
+          <main id="app-main" className="page-wrap flex-1">
+            <PageBoundary key={pathname}><Suspense fallback={<Loading />}><div className="animate-rise">{children}</div></Suspense></PageBoundary>
+          </main>
+        </div>
       </div>
-    </div>
+    </BrandProvider>
   );
 }

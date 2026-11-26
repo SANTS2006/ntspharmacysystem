@@ -1,91 +1,43 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Banknote, Clock, FileText, Plus, RotateCcw, TrendingUp } from "lucide-react";
 import { useState } from "react";
-import { ApiError, api } from "../../lib/api";
-import { EmptyState, Loading, StatusBadge, useConfirm, usePrompt } from "../../components/ui";
+import { DataTable, FormModal, PageHeader, StatCard, StatusBadge, Tabs, errorMessage, useConfirm, usePrompt, useToast } from "../../components/ui";
+import { ServerTable, type ApiPage } from "../../components/ui/ServerTable";
+import { api } from "../../lib/api";
+import { day, money } from "../../lib/format";
 
-interface Invoice { id: number; number: string; pharmacy_name: string; amount: string; currency: string; status: string; due_date: string; refunded_amount: string }
-interface Plan { id: number; name: string; price: string; currency: string }
-interface Page<T> { results: T[]; next: string | null; previous: string | null }
+interface Invoice { id: number; number: string; pharmacy_name: string; amount: string; currency: string; status: string; due_date: string; refunded_amount: string; payment_method: string }
+interface Plan { id: number; name: string; code: string; price: string; currency: string; interval: string; max_branches: number; max_users: number; is_active: boolean }
 interface Revenue { collected: string; refunded: string; net_revenue: string; outstanding: string }
 
 export default function Billing() {
-  const promptFor = usePrompt(); const confirmDialog = useConfirm();
-  const qc = useQueryClient();
-  const [status, setStatus] = useState(""); const [page, setPage] = useState(1);
-  const [err, setErr] = useState<string | null>(null);
-  const inv = useQuery({ queryKey: ["invoices", status, page], queryFn: () => api<Page<Invoice>>(`/platform/billing/invoices/?page=${page}${status ? `&status=${status}` : ""}`) });
+  const prompt = usePrompt(); const confirm = useConfirm(); const toast = useToast(); const qc = useQueryClient();
+  const [tab, setTab] = useState<"invoices" | "plans">("invoices");
+  const [dialog, setDialog] = useState<"invoice" | "plan" | null>(null);
   const rev = useQuery({ queryKey: ["revenue"], queryFn: () => api<Revenue>("/platform/billing/revenue/") });
   const plans = useQuery({ queryKey: ["plans-admin"], queryFn: () => api<Plan[]>("/platform/billing/plans/") });
-  const pharmacies = useQuery({ queryKey: ["pharmacies-all"], queryFn: () => api<Page<{ id: number; name: string }>>("/platform/pharmacies/?page=1") });
-  const [issue, setIssue] = useState({ pharmacy: "", plan: "" });
-  const refresh = () => { qc.invalidateQueries({ queryKey: ["invoices"] }); qc.invalidateQueries({ queryKey: ["revenue"] }); };
-  const onError = (e: unknown) => setErr(e instanceof ApiError ? `${e.message} ${JSON.stringify(e.details ?? "")}` : "Action failed.");
-  const [plan, setPlan] = useState({ name: "", code: "", price: "", max_branches: "1", max_users: "10" });
-  const planM = useMutation({
-    mutationFn: () => api("/platform/billing/plans/", { method: "POST", body: { ...plan, currency: "USD", interval: "monthly" } }),
-    onSuccess: () => { setErr(null); setPlan({ name: "", code: "", price: "", max_branches: "1", max_users: "10" }); qc.invalidateQueries({ queryKey: ["plans-admin"] }); },
-    onError,
-  });
-  const issueM = useMutation({ mutationFn: () => api("/platform/billing/invoices/issue/", { method: "POST", body: issue }), onSuccess: () => { setErr(null); refresh(); }, onError });
-  const actM = useMutation({
-    mutationFn: ({ id, action, body }: { id: number; action: string; body?: object }) => api(`/platform/billing/invoices/${id}/${action}/`, { method: "POST", body: body ?? {} }),
-    onSuccess: () => { setErr(null); refresh(); }, onError,
-  });
-  const pay = async (i: Invoice) => {
-    const v = await promptFor({ title: `Record payment · ${i.number}`, confirmLabel: "Record payment", fields: [
-      { name: "reference", label: "Payment reference" },
-      { name: "method", label: "Payment method", type: "select", defaultValue: "mobile_money", options: [["mobile_money", "Mobile money"], ["bank_transfer", "Bank transfer"], ["cash", "Cash"]] }] });
-    if (!v) return;
-    actM.mutate({ id: i.id, action: "pay", body: { payment_reference: v.reference, payment_method: v.method } });
-  };
-  const refund = async (i: Invoice) => {
-    const v = await promptFor({ title: `Refund · ${i.number}`, confirmLabel: "Continue", fields: [
-      { name: "amount", label: `Refund amount (max ${i.amount})`, type: "number", step: "0.01", min: 0.01 }, { name: "reason", label: "Refund reason", type: "textarea", required: false }] });
-    if (!v) return;
-    const { amount, reason } = v;
-    if (await confirmDialog({ title: "Record this refund?", message: `Refund ${amount} ${i.currency} on ${i.number}. This is recorded permanently.`, confirmLabel: "Record refund", danger: true })) actM.mutate({ id: i.id, action: "refund", body: { amount, reason } });
-  };
+  const pharmacies = useQuery({ queryKey: ["pharmacies", "options"], queryFn: () => api<ApiPage<{ id: number; name: string }>>("/platform/pharmacies/?page_size=200"), enabled: dialog === "invoice" });
+  const done = (t: string) => { ["invoices", "revenue", "plans-admin"].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); toast(t); };
+  const act = (id: number, action: string, body: object, text: string) => api(`/platform/billing/invoices/${id}/${action}/`, { method: "POST", body }).then(() => done(text)).catch((e) => toast(errorMessage(e), "error"));
+  const pay = async (i: Invoice) => { const v = await prompt({ title: `Record payment · ${i.number}`, confirmLabel: "Record payment", fields: [{ name: "payment_reference", label: "Payment reference" }, { name: "payment_method", label: "Payment method", type: "select", defaultValue: "mobile_money", options: [["mobile_money", "Mobile money"], ["bank_transfer", "Bank transfer"], ["cash", "Cash"]] }] }); if (v) act(i.id, "pay", v, "Payment recorded."); };
+  const refund = async (i: Invoice) => { const v = await prompt({ title: `Refund · ${i.number}`, message: `Maximum ${money(i.amount, i.currency)}`, confirmLabel: "Continue", fields: [{ name: "amount", label: "Refund amount", type: "number", step: "0.01", min: 0.01 }, { name: "reason", label: "Refund reason", type: "textarea", required: false }] }); if (v && await confirm({ title: "Record this refund?", message: `${money(v.amount, i.currency)} on ${i.number}. This is recorded permanently.`, confirmLabel: "Record refund", danger: true })) act(i.id, "refund", v, "Refund recorded."); };
   return (
-    <div className="space-y-4">
-      <h1 className="page-title">Subscription billing</h1>
-      {rev.data && (
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          {Object.entries({ Collected: rev.data.collected, Refunded: rev.data.refunded, "Net revenue": rev.data.net_revenue, Outstanding: rev.data.outstanding }).map(([k, v]) => (
-            <div key={k} className="card p-4"><p className="text-xs uppercase text-slate-500">{k}</p><p className="text-xl font-semibold">{Number(v).toLocaleString()}</p></div>))}
-        </div>)}
-      <form onSubmit={(e) => { e.preventDefault(); issueM.mutate(); }} className="flex flex-wrap items-end gap-2 card p-4">
-        <label className="text-sm">Pharmacy<select required className="mt-1 block px-3 py-2" value={issue.pharmacy} onChange={(e) => setIssue({ ...issue, pharmacy: e.target.value })}><option value="">Select a pharmacy</option>{pharmacies.data?.results.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
-        <label className="text-sm">Plan<select required className="mt-1 block px-3 py-2" value={issue.plan} onChange={(e) => setIssue({ ...issue, plan: e.target.value })}><option value="">Select a plan</option>{plans.data?.map((p) => <option key={p.id} value={p.id}>{p.name} ({p.currency} {p.price})</option>)}</select></label>
-        <button disabled={issueM.isPending} className="btn btn-primary">Issue invoice</button>
-        {plans.data?.length === 0 && <span className="text-sm text-amber-700">No plans exist yet. Create one below.</span>}
-      </form>
-      <form onSubmit={(e) => { e.preventDefault(); planM.mutate(); }} className="flex flex-wrap items-end gap-2 card p-4">
-        <label className="text-sm">Plan name<input required placeholder="Enter the plan name" className="mt-1 block px-3 py-2" value={plan.name} onChange={(e) => setPlan({ ...plan, name: e.target.value })} /></label>
-        <label className="text-sm">Code<input required placeholder="Enter the plan code" className="mt-1 block px-3 py-2" value={plan.code} onChange={(e) => setPlan({ ...plan, code: e.target.value })} /></label>
-        <label className="text-sm">Price<input required type="number" min="0.01" step="0.01" placeholder="Enter the price" className="mt-1 block w-28 px-3 py-2" value={plan.price} onChange={(e) => setPlan({ ...plan, price: e.target.value })} /></label>
-        <label className="text-sm">Max branches<input type="number" min="1" className="mt-1 block w-24 px-3 py-2" value={plan.max_branches} onChange={(e) => setPlan({ ...plan, max_branches: e.target.value })} /></label>
-        <label className="text-sm">Max users<input type="number" min="1" className="mt-1 block w-24 px-3 py-2" value={plan.max_users} onChange={(e) => setPlan({ ...plan, max_users: e.target.value })} /></label>
-        <button disabled={planM.isPending} className="btn btn-outline">Create plan</button>
-      </form>
-      {err && <p role="alert" className="alert alert-error">{err}</p>}
-      <select aria-label="Filter by status" value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); }} className="px-3 py-2">
-        <option value="">All</option><option value="issued">Issued</option><option value="paid">Paid</option><option value="refunded">Refunded</option><option value="void">Void</option>
-      </select>
-      {inv.isLoading && <Loading />}
-      {inv.data?.results.length === 0 && <EmptyState>No invoices.</EmptyState>}
-      {inv.data && inv.data.results.length > 0 && (
-        <div className="table-wrap"><table className="table">
-          <thead><tr><th>Number</th><th>Pharmacy</th><th>Amount</th><th>Status</th><th>Due</th><th>Actions</th></tr></thead>
-          <tbody>{inv.data.results.map((i) => (
-            <tr key={i.id}><td>{i.number}</td><td>{i.pharmacy_name}</td><td>{i.currency} {i.amount}{Number(i.refunded_amount) > 0 && ` (−${i.refunded_amount})`}</td><td><StatusBadge status={i.status} /></td><td>{i.due_date}</td>
-              <td className="space-x-2">
-                {i.status === "issued" && <><button onClick={() => pay(i)} className="btn-link">Record payment</button><button onClick={async () => { if (await confirmDialog({ title: "Void this invoice?", message: `${i.number} will no longer be payable.`, confirmLabel: "Void invoice", danger: true })) actM.mutate({ id: i.id, action: "void" }); }} className="btn-link">Void</button></>}
-                {i.status === "paid" && <button onClick={() => refund(i)} className="btn-link">Refund</button>}
-              </td></tr>))}</tbody></table></div>)}
-      <div className="flex gap-2">
-        <button disabled={!inv.data?.previous} onClick={() => setPage((p) => p - 1)} className="btn btn-outline btn-sm">Previous</button>
-        <button disabled={!inv.data?.next} onClick={() => setPage((p) => p + 1)} className="btn btn-outline btn-sm">Next</button>
-      </div>
+    <div className="space-y-5">
+      <PageHeader title="Subscription billing" subtitle="Plans, invoices and revenue. Pharmacies can pay SLE or USD invoices online with mobile money."
+        actions={tab === "invoices" ? <button className="btn btn-primary" onClick={() => setDialog("invoice")} disabled={!plans.data?.length}><Plus size={16} aria-hidden />Issue invoice</button> : <button className="btn btn-primary" onClick={() => setDialog("plan")}><Plus size={16} aria-hidden />Create plan</button>} />
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><StatCard label="Collected" value={rev.data ? money(rev.data.collected) : "…"} icon={Banknote} /><StatCard label="Refunded" value={rev.data ? money(rev.data.refunded) : "…"} icon={RotateCcw} tone="warning" /><StatCard label="Net revenue" value={rev.data ? money(rev.data.net_revenue) : "…"} icon={TrendingUp} tone="navy" /><StatCard label="Outstanding" value={rev.data ? money(rev.data.outstanding) : "…"} icon={Clock} tone="info" /></div>
+      <Tabs tabs={[["invoices", "Invoices"], ["plans", "Plans"]]} value={tab} onChange={setTab} />
+      {plans.data?.length === 0 && <p className="alert alert-warning"><FileText size={16} aria-hidden />No plans exist yet. Create a plan before issuing invoices.</p>}
+      {tab === "invoices" && <ServerTable<Invoice> queryKey={["invoices"]} path="/platform/billing/invoices/" rowKey={(i) => i.id} search="Enter your invoice or pharmacy search" empty="No invoices."
+        filters={[{ name: "status", label: "All statuses", options: [["issued", "Issued"], ["paid", "Paid"], ["refunded", "Refunded"], ["void", "Void"]] }]}
+        columns={[{ key: "number", header: "Invoice", render: (i) => <b>{i.number}</b> }, { key: "pharmacy", header: "Pharmacy", render: (i) => i.pharmacy_name }, { key: "amount", header: "Amount", align: "right", render: (i) => <><b>{money(i.amount, i.currency)}</b>{Number(i.refunded_amount) > 0 && <span className="block text-xs text-warning">refunded {money(i.refunded_amount)}</span>}</> }, { key: "due", header: "Due", render: (i) => day(i.due_date) }, { key: "status", header: "Status", render: (i) => <StatusBadge status={i.status} /> }, { key: "method", header: "Paid by", render: (i) => i.payment_method.replace(/_/g, " ") || "—" },
+          { key: "actions", header: "Actions", align: "right", render: (i) => <span className="inline-flex gap-1.5">{i.status === "issued" && <><button className="btn-link" onClick={() => pay(i)}>Record payment</button><button className="btn-link btn-link-danger" onClick={async () => { if (await confirm({ title: "Delete this invoice?", message: `${i.number} is voided and can no longer be paid.`, confirmLabel: "Void invoice", danger: true })) act(i.id, "void", {}, "Invoice voided."); }}>Void</button></>}{i.status === "paid" && <button className="btn-link" onClick={() => refund(i)}>Refund</button>}</span> }]} />}
+      {tab === "plans" && <DataTable<Plan> rows={plans.data} loading={plans.isLoading} rowKey={(x) => x.id} empty="No plans yet."
+        columns={[{ key: "name", header: "Plan", render: (x) => <><b className="block">{x.name}</b><span className="text-xs text-muted">{x.code}</span></> }, { key: "price", header: "Price", align: "right", render: (x) => <b>{money(x.price, x.currency)}</b>, sort: (x) => Number(x.price) }, { key: "interval", header: "Billed", render: (x) => <span className="capitalize">{x.interval}</span> }, { key: "branches", header: "Branches", align: "center", render: (x) => x.max_branches }, { key: "users", header: "Users", align: "center", render: (x) => x.max_users }, { key: "status", header: "Status", render: (x) => <StatusBadge status={x.is_active ? "active" : "inactive"} /> }]} />}
+      {dialog === "invoice" && <FormModal title="Issue invoice" submitLabel="Issue invoice" onClose={() => setDialog(null)} fields={[{ name: "pharmacy", label: "Pharmacy", type: "select", wide: true, options: (pharmacies.data?.results ?? []).map((x) => [String(x.id), x.name]) }, { name: "plan", label: "Plan", type: "select", wide: true, options: (plans.data ?? []).filter((x) => x.is_active).map((x) => [String(x.id), `${x.name} (${x.currency} ${x.price})`]) }]}
+        onSubmit={async (v) => { await api("/platform/billing/invoices/issue/", { method: "POST", body: v }); done("Invoice issued."); }} />}
+      {dialog === "plan" && <FormModal title="Create plan" submitLabel="Create plan" onClose={() => setDialog(null)} fields={[{ name: "name", label: "Plan name" }, { name: "code", label: "Plan code" }, { name: "price", label: "Price", type: "number", min: 0.01, step: "0.01" }, { name: "currency", label: "Currency", type: "select", defaultValue: "SLE", options: [["SLE", "SLE"], ["USD", "USD"]] }, { name: "interval", label: "Billing interval", type: "select", defaultValue: "monthly", options: [["monthly", "Monthly"], ["yearly", "Yearly"]] }, { name: "max_branches", label: "Maximum branches", type: "number", min: 1, step: "1", defaultValue: 1 }, { name: "max_users", label: "Maximum users", type: "number", min: 1, step: "1", defaultValue: 10 }]}
+        onSubmit={async (v) => { await api("/platform/billing/plans/", { method: "POST", body: v }); done("Plan created."); }} />}
     </div>
   );
 }

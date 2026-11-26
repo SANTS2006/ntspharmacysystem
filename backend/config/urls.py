@@ -6,6 +6,7 @@ from django.conf import settings
 from django.urls import re_path
 
 from apps.backups import views as backup_views  # noqa: E402
+from apps.core import seo
 from apps.core.views import spa_index
 
 urlpatterns = [
@@ -31,6 +32,10 @@ urlpatterns = [
     path("api/v1/", include("apps.reporting.urls")),
     path("api/v1/", include("apps.backups.urls")),
     path("api/v1/audit-logs/", include("apps.audit.urls")),
+    path("api/v1/", include("apps.notifications.urls")),
+    path("api/v1/", include("apps.billing.tenant_urls")),
+    path("robots.txt", seo.robots_txt),
+    path("sitemap.xml", seo.sitemap_xml),
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
     path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema"), name="docs"),
 ]

@@ -13,7 +13,7 @@ from .models import Branch, Pharmacy
 
 def pharmacy_urls(pharmacy: Pharmacy) -> dict:
     from apps.core.links import site_url
-    return {"website": site_url(pharmacy.slug), "admin_login": site_url(pharmacy.slug, "/admin/login")}
+    return {"website": site_url(pharmacy.slug), "admin_login": site_url(pharmacy.slug, "/login")}
 
 
 @transaction.atomic
@@ -48,15 +48,19 @@ def register_pharmacy(*, actor, admin_full_name, admin_email, admin_phone="", us
                  slug=pharmacy.slug)
     audit.record("auth.credentials_issued", actor=actor, tenant=pharmacy, target=admin, request=request, method=method)
     text = (f"Welcome to {settings.PLATFORM_NAME}!\n\nYour pharmacy \"{pharmacy.name}\" has been registered.\n"
-            f"Website: {urls['website']}\nAdmin login: {urls['admin_login']}\nEmail: {admin.email}\n{credential_text}\n\n"
+            f"Website: {urls['website']}\nSign in: {urls['admin_login']}\nEmail: {admin.email}\n{credential_text}\n\n"
             "Security: never share this email. Change your password immediately and keep it private.")
     html_body = render_branded_html(
-        title=f"Welcome to {settings.PLATFORM_NAME}", pharmacy=pharmacy, button=("Open admin login", urls["admin_login"]),
+        title=f"Welcome to {settings.PLATFORM_NAME}", pharmacy=pharmacy, button=("Sign in to your pharmacy", urls["admin_login"]),
         paragraphs=[f'Your pharmacy "{pharmacy.name}" has been registered.', f"Website: {urls['website']}",
                     f"Registered email: {admin.email}", credential_text,
                     "Security: never share this email. Change your password at first login."])
     send_email(to=admin.email, subject=f"Your {settings.PLATFORM_NAME} pharmacy is ready", text=text,
                html_body=html_body, tenant=pharmacy, template="admin_onboarding")
+    from apps.notifications import inapp
+    inapp.push([admin], kind="account", level="success", title=f"Welcome to {settings.PLATFORM_NAME}",
+               body=f"{pharmacy.name} is ready. Start by checking your pharmacy settings and branches.", link="/dashboard")
+    inapp.push(inapp.platform_admins(), kind="platform", title="New pharmacy registered", body=pharmacy.name, link=f"/pharmacies/{pharmacy.pk}", exclude=actor)
     return pharmacy
 
 

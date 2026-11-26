@@ -6,7 +6,9 @@ from apps.core.models import TenantOwnedModel, TimeStampedModel
 
 
 class PaymentProviderConfig(TenantOwnedModel):
-    """Per-pharmacy provider credentials (funds must land in the PHARMACY's account). Secrets are encrypted at rest and never returned by any API."""
+    """NO LONGER USED: mobile money is configured only through the environment. Kept so existing rows are not destroyed.
+
+    Per-pharmacy provider credentials (funds must land in the PHARMACY's account). Secrets are encrypted at rest and never returned by any API."""
     provider = models.CharField(max_length=20, default="monime")
     enabled = models.BooleanField(default=False)
     space_id = models.CharField(max_length=100, blank=True)
@@ -96,3 +98,35 @@ class OrderRefund(TenantOwnedModel):
             models.CheckConstraint(condition=models.Q(amount__gt=0), name="order_refund_positive"),
             models.UniqueConstraint(fields=["tenant", "reference"], name="uniq_order_refund_reference"),
         ]
+
+
+class MobileMoneyCollection(TenantOwnedModel):
+    """A USSD payment code raised at the till. A sale can only use it once the provider itself reports it as paid."""
+    class Status(models.TextChoices):
+        PENDING = "pending"
+        PROCESSING = "processing"
+        COMPLETED = "completed"
+        CANCELLED = "cancelled"
+        EXPIRED = "expired"
+        FAILED = "failed"
+
+    reference = models.CharField(max_length=40)
+    provider_code_id = models.CharField(max_length=100, null=True, blank=True, unique=True)
+    ussd_code = models.CharField(max_length=60, blank=True)
+    amount = models.DecimalField(max_digits=14, decimal_places=2)
+    currency = models.CharField(max_length=3)
+    status = models.CharField(max_length=12, choices=Status.choices, default=Status.PENDING, db_index=True)
+    branch = models.ForeignKey("tenants.Branch", on_delete=models.PROTECT, related_name="+")
+    customer_name = models.CharField(max_length=100, blank=True)
+    created_by = models.ForeignKey("accounts.User", null=True, on_delete=models.SET_NULL, related_name="+")
+    expires_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    used_at = models.DateTimeField(null=True, blank=True)  # set when a sale consumes the money: never twice
+    used_for = models.CharField(max_length=40, blank=True)
+
+    class Meta(TenantOwnedModel.Meta):
+        constraints = [
+            models.UniqueConstraint(fields=["tenant", "reference"], name="uniq_momo_reference"),
+            models.CheckConstraint(condition=models.Q(amount__gt=0), name="momo_amount_positive"),
+        ]
+        ordering = ["-created_at"]

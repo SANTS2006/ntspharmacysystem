@@ -38,7 +38,7 @@ def _tenant(slug):
 def medicine_card(m, branch=None, with_stock=True):
     d = {"id": m.pk, "name": m.name, "generic_name": m.generic_name, "brand_name": m.brand_name, "strength": m.strength, "dosage_form": m.dosage_form,
          "category": m.category.name, "price": m.selling_price, "description": m.description, "requires_prescription": m.requires_prescription,
-         "image": None}
+         "image": m.image.url if m.image else None}
     if with_stock and branch is not None:
         d["available"] = services.saleable_stock(m, branch) > 0
     return d
@@ -276,6 +276,39 @@ class MeView(TenantContextMixin, APIView):
         s.save()
         audit.record("customer.profile_updated", actor=request.user, request=request, fields=sorted(request.data))
         return Response(s.data)
+
+
+class SummaryView(TenantContextMixin, APIView):
+    """Figures for the signed-in customer's own dashboard."""
+    permission_classes = [IsVerifiedCustomer]
+
+    def get(self, request):
+        from datetime import timedelta
+
+        from django.db.models import Count, Sum
+        from django.db.models.functions import TruncMonth
+        from django.utils import timezone
+
+        from apps.engagement.models import Appointment
+
+        from .customer_views import PAID
+        qs = Order.objects.filter(customer=request.user)
+        paid = qs.filter(status__in=PAID)
+        first = (timezone.localdate().replace(day=1) - timedelta(days=150)).replace(day=1)
+        spent = {r["m"].date(): r["t"] for r in paid.filter(created_at__date__gte=first).annotate(m=TruncMonth("created_at")).values("m").annotate(t=Sum("total"))}
+        months, m = [], first
+        while m <= timezone.localdate():
+            months.append({"month": m.strftime("%b"), "spent": spent.get(m, 0)})
+            m = (m + timedelta(days=32)).replace(day=1)
+        upcoming = Appointment.objects.filter(customer=request.user, status__in=["requested", "confirmed"], start_at__gte=timezone.now()).select_related("service").order_by("start_at")[:5]
+        return Response({
+            "currency": (request.user.tenant.settings or {}).get("currency", "SLE"), "orders": qs.count(),
+            "open_orders": qs.exclude(status__in=["delivered", "completed", "cancelled", "refunded", "prescription_rejected"]).count(),
+            "awaiting_payment": qs.filter(status="awaiting_payment", payment_method="monime").count(),
+            "spent": paid.aggregate(t=Sum("total"))["t"] or 0, "monthly": months,
+            "by_status": [{"label": r["status"], "value": r["n"]} for r in qs.values("status").annotate(n=Count("id")).order_by("-n")],
+            "recent": [order_out(o) for o in qs.select_related("branch", "prescription").order_by("-created_at")[:5]],
+            "appointments": [{"id": a.pk, "service": a.service.name, "start_at": a.start_at, "status": a.status} for a in upcoming]})
 
 
 # ======================= customer orders =======================

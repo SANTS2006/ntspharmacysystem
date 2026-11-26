@@ -315,6 +315,8 @@ def pay_line(line_id, *, amount: Decimal, method: str, reference: str, actor) ->
         body = f"Your salary for {run.period} has been paid. You can view and download your salary slip in your staff account."
         send_email(to=line.user.email, subject=f"Salary slip {run.period}", text=body, tenant=t, template="payroll_notification",
                    html_body=render_branded_html(title="Salary paid", pharmacy=t, paragraphs=[body]))  # no amounts in email
+        from apps.notifications import inapp
+        inapp.push([line.user], kind="payroll", level="success", title=f"Salary slip {run.period}", body="Your salary has been paid.", link="/my-work")
     return pay
 
 

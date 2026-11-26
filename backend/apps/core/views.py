@@ -55,6 +55,7 @@ def spa_index(request, *args, **kwargs):
     index = settings.FRONTEND_DIST / "index.html"
     if not index.exists():
         raise Http404("Frontend build not found.")
-    resp = HttpResponse(index.read_bytes(), content_type="text/html; charset=utf-8")
+    from .seo import inject
+    resp = HttpResponse(inject(index.read_text(encoding="utf-8"), request), content_type="text/html; charset=utf-8")
     resp["Cache-Control"] = "no-store"
     return resp

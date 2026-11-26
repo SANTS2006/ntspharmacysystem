@@ -21,7 +21,7 @@ from apps.core.tenant_context import tenant_context
 from apps.inventory.tasks import send_stock_alerts
 from apps.medicines.models import Medicine
 from apps.payments import monime, services
-from apps.payments.models import OrderReceipt, PaymentAttempt, PaymentProviderConfig, WebhookEvent
+from apps.payments.models import OrderReceipt, PaymentAttempt, WebhookEvent
 from apps.shop.models import Order
 
 from .test_foundation import api, login, platform_admin, platform_client, register, settled_token, two_pharmacies  # noqa: F401
@@ -33,13 +33,16 @@ OTHER_SECRET = "o" * 40
 _ev = iter(range(10_000))
 
 
+def configure(settings, secret=SECRET):
+    settings.MONIME_SPACE_ID, settings.MONIME_ACCESS_TOKEN, settings.MONIME_WEBHOOK_SECRET = "spc-1", "mon_test_SECRETTOKEN", secret
+
+
 @pytest.fixture
-def pay(env):
+def pay(env, settings):
     g = env["g"]
     User.objects.create_user("acc@green.test", PW, tenant=g, full_name="Acc", role=g.roles.get(code="accountant"))
     env["acc"] = api("greenlife", login("greenlife", "acc@green.test", PW).data["tokens"]["access"])
-    r = env["admin"].put("/api/v1/payments/config/", {"enabled": True, "space_id": "spc-1", "access_token": "mon_test_TOKEN", "webhook_secret": SECRET}, format="json")
-    assert r.status_code == 200, r.data
+    configure(settings)
     stock(env, env["para"])
     return env
 
@@ -80,21 +83,20 @@ def provider(status="completed", sid="chk-1", total_minor=None):
 
 
 # ---------------- configuration and secrets ----------------
-def test_config_secrets_are_encrypted_and_write_only(env):
+def test_credentials_come_only_from_the_environment_and_are_never_returned(env, settings):
     c = env["admin"]
-    assert c.put("/api/v1/payments/config/", {"enabled": True}, format="json").status_code == 400  # incomplete
-    assert c.put("/api/v1/payments/config/", {"webhook_secret": "short"}, format="json").status_code == 400
-    r = c.put("/api/v1/payments/config/", {"space_id": "spc-1", "access_token": "mon_test_SECRETTOKEN", "webhook_secret": SECRET, "enabled": True}, format="json")
-    assert r.status_code == 200 and r.data["enabled"] is True and r.data["access_token_set"] is True
-    blob = json.dumps(r.data) + json.dumps(c.get("/api/v1/payments/config/").data)
-    assert "SECRETTOKEN" not in blob and SECRET not in blob and "access_token\"" not in blob.replace("access_token_set", "")
-    row = PaymentProviderConfig.all_objects.get(tenant=env["g"])
-    assert "SECRETTOKEN" not in row.access_token_enc and SECRET not in row.webhook_secret_enc and row.access_token_enc
-    assert "SECRETTOKEN" not in json.dumps(list(AuditLog.objects.values_list("metadata", flat=True)))
-    assert c.put("/api/v1/payments/config/", {"space_id": "spc-2"}, format="json").status_code == 200
-    assert services.get_config(env["g"]).access_token == "mon_test_SECRETTOKEN"  # blank keeps the stored secret
-    assert env["cash"].get("/api/v1/payments/config/").status_code == 403
-    assert env["admin_b"].get("/api/v1/payments/config/").data["access_token_set"] is False  # per pharmacy
+    assert c.get("/api/v1/payments/status/").data["enabled"] is False
+    configure(settings)
+    r = c.get("/api/v1/payments/status/")
+    assert r.status_code == 200 and r.data["enabled"] is True and set(r.data) == {"provider", "enabled", "currency"}
+    assert "SECRETTOKEN" not in json.dumps(r.data) and SECRET not in json.dumps(r.data)
+    assert c.put("/api/v1/payments/config/", {"access_token": "x"}, format="json").status_code == 404  # nothing to enter in the app
+    assert env["admin_b"].get("/api/v1/payments/status/").data["enabled"] is True  # platform-wide
+
+
+def test_idempotency_keys_are_unique_per_pharmacy_and_within_the_provider_limit():
+    assert monime.idempotency_key(1, "PAY-2026-00001") != monime.idempotency_key(2, "PAY-2026-00001")
+    assert len(monime.idempotency_key(123456, "X" * 80)) <= 64
 
 
 # ---------------- signature verification ----------------
@@ -117,11 +119,11 @@ def test_signature_verification_rules():
 
 
 # ---------------- starting a payment ----------------
-def test_online_method_needs_enabled_provider_and_staff_cannot_confirm_it(env):
+def test_online_method_needs_enabled_provider_and_staff_cannot_confirm_it(env, settings):
     cl = customer(env)
     stock(env, env["para"])
     place(cl, order_body(env, payment_method="monime"), status=400)  # not configured
-    env["admin"].put("/api/v1/payments/config/", {"enabled": True, "space_id": "s", "access_token": "t" * 12, "webhook_secret": SECRET}, format="json")
+    configure(settings)
     oid = place(cl, order_body(env, payment_method="monime")).data["id"]
     r = move(env["cash"], oid, "payment_confirmed", 409)
     assert "payment provider" in r.data["error"]["message"]
@@ -212,8 +214,6 @@ def test_forged_unsigned_or_misrouted_webhooks_change_nothing(pay):
         assert post_hook("greenlife", body, header="t=1,v1=AAAA").status_code == 400
         assert post_hook("greenlife", body, secret=OTHER_SECRET).status_code == 400  # signed with someone else's secret
         assert post_hook("greenlife", body, header=sign(body, t=int(time.time()) - 3600)).status_code == 400  # replayed old delivery
-        assert post_hook("bluecross", body).status_code == 400  # another pharmacy has no such secret/config
-        assert post_hook("nosuchslug", body).status_code == 404
         assert api().get("/api/v1/webhooks/monime/greenlife/").status_code == 405
         assert not p.called  # nothing in an unverified body is acted on
     assert cl.get(f"/api/v1/shop/orders/{oid}/").data["status"] == "awaiting_payment"
@@ -293,7 +293,7 @@ def test_reconciliation_resolves_missed_webhooks(pay):
     with provider("completed"):
         assert pay["acc"].post("/api/v1/payments/reconcile/", {}, format="json").data["checked"] == 0  # nothing pending any more
     from apps.payments.tasks import reconcile_all
-    assert reconcile_all() == {"greenlife": {"checked": 0, "confirmed": 0, "failed": 0, "still_pending": 0, "errors": 0}}
+    assert reconcile_all() == {}  # only pharmacies with something pending are visited
 
 
 def test_staff_attempt_listing_is_branch_scoped(pay):
@@ -387,7 +387,8 @@ def test_websocket_rejects_unauthenticated_and_invalid_tokens(env):
             assert out["type"] == "websocket.close" and out["code"] == 4401  # never authenticated
         platform = await connect(ptoken)
         out = await platform.receive_output(timeout=3)
-        assert out["type"] == "websocket.close"  # platform admins have no tenant feed
+        assert out["type"] == "websocket.send" and "ready" in out["text"]  # platform admins get only their personal notification feed
+        await platform.disconnect()
 
     async_to_sync(run)()
 
@@ -441,8 +442,8 @@ def test_websocket_prescription_and_inventory_topics(pay):
         await sync_to_async(trigger)()
         p, t, c = await drain(ph), await drain(tech), await drain(cash)
         assert {e["event"] for e in p} >= {"inventory.low_stock", "prescription.created"}
-        assert {e["event"] for e in t} == {"prescription.created", "inventory.low_stock"}  # technicians hold prescription.view and inventory.view
-        assert c == []  # cashiers have neither
+        assert {e["event"] for e in t if e["event"] != "notification.created"} == {"prescription.created", "inventory.low_stock"}  # technicians hold prescription.view and inventory.view
+        assert [e for e in c if e["event"] != "notification.created"] == []  # cashiers have neither topic
         for x in (ph, tech, cash):
             await x.disconnect()
     async_to_sync(run)()

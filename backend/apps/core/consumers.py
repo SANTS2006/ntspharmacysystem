@@ -20,12 +20,14 @@ def authenticate(raw):
         user = User.objects.select_related("tenant", "role").get(pk=tok["user_id"])
     except (TokenError, User.DoesNotExist, KeyError):
         return None
-    if tok.get("cv") != user.credential_version or not user.is_active or user.must_change_password or user.is_platform_admin:
+    if tok.get("cv") != user.credential_version or not user.is_active or user.must_change_password:
         return None
+    if user.is_platform_admin:  # personal notifications only: no tenant topics
+        return user, [user_group(0, user.pk)], int(tok["exp"])
     if user.tenant is None or not user.tenant.is_active_tenant:
         return None
     groups = [user_group(user.tenant_id, user.pk)]
-    if user.role.code != "customer":
+    if user.role is not None and user.role.code != "customer":
         for topic, perm in TOPIC_PERMISSIONS.items():
             if user.has_tenant_perm(perm):
                 groups.append(topic_group(user.tenant_id, topic, user.branch_id if user.is_branch_scoped else None))

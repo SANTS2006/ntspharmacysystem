@@ -76,6 +76,8 @@ def _admins():
 
 
 def notify_failure(subject: str, detail: str) -> None:
+    from apps.notifications import inapp
+    inapp.push(_admins(), kind="backup", level="danger", title=subject, body=detail[:500], link="/backups")
     for a in _admins():
         send_email(to=a.email, subject=subject, text=f"{detail}\n\nSign in to the platform dashboard to review backups.", template="backup_alert")
 
@@ -206,6 +208,8 @@ def request_restore(*, user, backup_id, reason, password) -> RestoreRequest:
     req = RestoreRequest.objects.create(backup=rec, reason=reason[:300], requested_by=user, expires_at=timezone.now() + timedelta(minutes=settings.RESTORE_APPROVAL_MINUTES))
     _log(req, f"Restore of {rec.number} requested by {user.email}")
     audit.record("restore.requested", actor=user, backup=rec.number, request_id=req.pk, reason=reason)
+    from apps.notifications import inapp
+    inapp.push(_admins(), kind="backup", level="warning", title="Restore approval needed", body=f"{user.email} requested a restore from {rec.number}.", link="/backups", exclude=user)
     for a in _admins():
         if a.pk != user.pk:
             send_email(to=a.email, subject="Restore approval needed", text=f"{user.email} requested a database restore from {rec.number}. Review it in the platform dashboard; it expires in {settings.RESTORE_APPROVAL_MINUTES} minutes.", template="restore_request")

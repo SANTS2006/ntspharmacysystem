@@ -1,10 +1,14 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
-import { ApiError, api } from "../../lib/api";
+/** Financial statements, journal, expenses and daily close. */
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Banknote, CircleDollarSign, Lock, Plus, TrendingDown, TrendingUp } from "lucide-react";
+import { useMemo, useState } from "react";
+import { ChartCard, DonutChart, RankBars, TrendChart } from "../../components/charts";
+import { DataTable, ErrorState, FormModal, Loading, PageHeader, StatCard, StatusBadge, Tabs, errorMessage, useConfirm, usePrompt, useToast, type FieldDef } from "../../components/ui";
+import { ServerTable } from "../../components/ui/ServerTable";
+import { api } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
-import { EmptyState, PageHeader, StatusBadge, useConfirm, usePrompt } from "../../components/ui";
+import { day, money, words } from "../../lib/format";
 
-interface Page<T> { count: number; next: string | null; previous: string | null; results: T[] }
 interface Account { id: number; code: string; name: string; type: string; is_active: boolean }
 interface Line { name: string; code: string; amount: string }
 interface Income { revenue: Line[]; net_revenue: string; cost_of_sales: Line[]; cost_of_sales_total: string; gross_profit: string; operating_expenses: Line[]; operating_expenses_total: string; net_profit: string }
@@ -12,103 +16,83 @@ interface Sheet { assets: Line[]; liabilities: Line[]; equity: Line[]; current_e
 interface Tb { rows: { code: string; name: string; debit: string; credit: string }[]; total_debit: string; total_credit: string; balanced: boolean }
 interface Cash { opening_cash: string; by_source: { source: string; inflow: string; outflow: string; net: string }[]; net_change: string; closing_cash: string }
 interface Entry { id: number; number: string; date: string; description: string; source_type: string; total: string; reversed: boolean }
-interface Expense { id: number; date: string; account_name: string; amount: string; payment_method: string; description: string; status: string; branch: number | null }
+interface Expense { id: number; date: string; account_name: string; amount: string; payment_method: string; description: string; status: string }
 interface BranchRow { branch: number | null; name: string; net_revenue: string; cost_of_sales: string; gross_profit: string; operating_expenses: string; net_profit: string }
-
-const errText = (e: unknown) => (e instanceof ApiError ? `${e.message} ${e.details ? JSON.stringify(e.details) : ""}` : "Request failed.");
-const inputCls = "mt-1 px-3 py-2 font-normal";
-const brand = { background: "var(--brand)" };
-const money = (v: string | number) => Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const today = () => new Date().toISOString().slice(0, 10);
 type Tab = "income" | "sheet" | "tb" | "cash" | "branches" | "journal" | "expenses" | "close";
+const today = () => new Date().toISOString().slice(0, 10);
 
-const Rows = ({ rows }: { rows: Line[] }) => <>{rows.map((r) => <tr key={r.code}><td className="py-1 pl-4">{r.code} {r.name}</td><td className="text-right">{money(r.amount)}</td></tr>)}</>;
-const Tot = ({ label, v, strong }: { label: string; v: string; strong?: boolean }) => <tr className={`border-t ${strong ? "font-semibold" : ""}`}><td className="py-1">{label}</td><td className="text-right">{money(v)}</td></tr>;
+function Statement({ sections, balanced }: { sections: { title: string; rows: Line[]; totals: [string, string | number][] }[]; balanced?: boolean }) {
+  return (
+    <div className="table-wrap"><table className="table"><thead><tr><th>Account</th><th className="text-right">Amount</th></tr></thead>
+      <tbody>{sections.flatMap((s) => [
+        <tr key={s.title}><td colSpan={2} className="!bg-slate-50 text-xs font-bold uppercase tracking-wider">{s.title}</td></tr>,
+        ...s.rows.map((r) => <tr key={`${s.title}-${r.code}`}><td className="!pl-8">{r.code} {r.name}</td><td className="text-right tabular-nums">{money(r.amount)}</td></tr>),
+        ...s.totals.map(([label, v]) => <tr key={`${s.title}-${label}`}><td className="font-bold">{label}</td><td className="text-right font-bold tabular-nums">{money(v)}</td></tr>),
+      ])}</tbody></table>
+      {balanced !== undefined && <p className={`m-3 alert ${balanced ? "alert-success" : "alert-error"}`}>{balanced ? "Balanced: assets = liabilities + equity." : "OUT OF BALANCE: contact support."}</p>}
+    </div>
+  );
+}
 
 export default function AccountingPage() {
-  const promptFor = usePrompt(); const confirmDialog = useConfirm();
-  const { user } = useAuth(); const qc = useQueryClient();
-  const can = (p: string) => !!user?.permissions.includes(p);
-  const full = can("accounting.view");
-  const manage = can("accounting.manage");
-  const [tab, setTab] = useState<Tab>("income"); const [msg, setMsg] = useState<{ ok: boolean; t: string } | null>(null);
+  const prompt = usePrompt(); const confirm = useConfirm(); const toast = useToast(); const { can } = useAuth(); const qc = useQueryClient();
+  const full = can("accounting.view"), manage = can("accounting.manage");
+  const [tab, setTab] = useState<Tab>("income");
+  const [dialog, setDialog] = useState<"expense" | "entry" | null>(null);
   const [from, setFrom] = useState(today().slice(0, 8) + "01"); const [to, setTo] = useState(today());
   const range = `date_from=${from}&date_to=${to}`;
-  const ok = (t: string) => { setMsg({ ok: true, t }); qc.invalidateQueries(); };
-  const fail = (e: unknown) => setMsg({ ok: false, t: errText(e) });
+  const done = (t: string) => { qc.invalidateQueries({ predicate: (q) => String(q.queryKey[0]).startsWith("acc-") }); toast(t); };
+  const fail = (e: unknown) => toast(errorMessage(e), "error");
   const income = useQuery({ queryKey: ["acc-income", from, to], queryFn: () => api<Income>(`/accounting/reports/income-statement/?${range}`), enabled: tab === "income" });
   const sheet = useQuery({ queryKey: ["acc-sheet", to], queryFn: () => api<Sheet>(`/accounting/reports/balance-sheet/?as_of=${to}`), enabled: tab === "sheet" && full });
   const tb = useQuery({ queryKey: ["acc-tb", to], queryFn: () => api<Tb>(`/accounting/reports/trial-balance/?as_of=${to}`), enabled: tab === "tb" && full });
   const cash = useQuery({ queryKey: ["acc-cash", from, to], queryFn: () => api<Cash>(`/accounting/reports/cash-flow/?${range}`), enabled: tab === "cash" && full });
   const branches = useQuery({ queryKey: ["acc-branches", from, to], queryFn: () => api<BranchRow[]>(`/accounting/reports/branch-summary/?${range}`), enabled: tab === "branches" });
   const accounts = useQuery({ queryKey: ["acc-accounts"], queryFn: () => api<Account[]>("/accounting/accounts/"), enabled: full });
-  const journal = useQuery({ queryKey: ["acc-journal"], queryFn: () => api<Page<Entry>>("/accounting/journal-entries/"), enabled: tab === "journal" && full });
-  const expenses = useQuery({ queryKey: ["acc-expenses"], queryFn: () => api<Page<Expense>>("/accounting/expenses/"), enabled: tab === "expenses" && full });
   const closes = useQuery({ queryKey: ["acc-closes"], queryFn: () => api<{ date: string; closed_by: string | null; summary: Record<string, string> }[]>("/accounting/closes/"), enabled: tab === "close" && full });
-
-  const [exp, setExp] = useState({ date: today(), account: "6100", amount: "", payment_method: "cash", description: "", vendor: "" });
-  const addExpense = useMutation({ mutationFn: () => api("/accounting/expenses/", { method: "POST", body: exp }), onSuccess: () => { setExp({ ...exp, amount: "", description: "", vendor: "" }); ok("Expense recorded."); }, onError: fail });
-  const [je, setJe] = useState({ description: "", a1: "", d1: "", a2: "", c2: "", date: today() });
-  const addEntry = useMutation({
-    mutationFn: () => api("/accounting/journal-entries/", { method: "POST", headers: { "Idempotency-Key": crypto.randomUUID() }, body: { description: je.description, date: je.date, lines: [{ account: je.a1, debit: je.d1 || "0" }, { account: je.a2, credit: je.c2 || "0" }] } }),
-    onSuccess: () => ok("Journal entry posted."), onError: fail,
-  });
-  const reverse = async (id: number, number: string, kind: "entry" | "expense") => {
-    const v = await promptFor({ title: `Reverse ${number}`, message: "A new opposite entry is created; the original stays on record.", confirmLabel: "Reverse posting", danger: true, fields: [{ name: "reason", label: "Reason for reversing", type: "textarea" }] });
-    if (!v) return; const reason = v.reason;
-    api(kind === "entry" ? `/accounting/journal-entries/${id}/reverse/` : `/accounting/expenses/${id}/reverse/`, { method: "POST", body: { reason } }).then(() => ok("Reversed.")).catch(fail);
-  };
-  const closeDay = async () => {
-    const v = await promptFor({ title: "Close the books", message: "Nothing can be posted into closed dates.", confirmLabel: "Continue", fields: [{ name: "date", label: "Close books through (YYYY-MM-DD)", placeholder: "YYYY-MM-DD" }] });
-    if (!v) return; const d = v.date;
-    if (await confirmDialog({ title: `Close all books through ${d}?`, message: "This cannot be undone.", confirmLabel: "Close books", danger: true })) api("/accounting/closes/", { method: "POST", body: { date: d } }).then(() => ok("Day closed.")).catch(fail);
-  };
-
-  const tabs: [Tab, string, boolean][] = [["income", "Profit & loss", true], ["branches", "Branches", true], ["sheet", "Balance sheet", full], ["tb", "Trial balance", full], ["cash", "Cash flow", full], ["journal", "Journal", full], ["expenses", "Expenses", full], ["close", "Daily close", full]];
-  const sel = (v: string, set: (s: string) => void, label: string, only?: string) => <select aria-label={label} required className={inputCls} value={v} onChange={(e) => set(e.target.value)}><option value="">{label}</option>{accounts.data?.filter((a) => a.is_active && (!only || a.type === only)).map((a) => <option key={a.id} value={a.code}>{a.code} {a.name}</option>)}</select>;
+  const options = useMemo(() => (accounts.data ?? []).filter((a) => a.is_active), [accounts.data]);
+  const accountOptions = (type?: string) => options.filter((a) => !type || a.type === type).map((a) => [a.code, `${a.code} ${a.name}`] as [string, string]);
+  const reverse = async (path: string, name: string) => { const v = await prompt({ title: `Reverse ${name}`, message: "A new opposite entry is created; the original stays on record.", confirmLabel: "Reverse posting", danger: true, fields: [{ name: "reason", label: "Reason for reversing", type: "textarea" }] }); if (v) api(path, { method: "POST", body: { reason: v.reason } }).then(() => done("Reversed.")).catch(fail); };
+  const closeDay = async () => { const v = await prompt({ title: "Close the books", message: "Nothing can be posted into closed dates.", confirmLabel: "Continue", fields: [{ name: "date", label: "Close books through", type: "date" }] }); if (v && await confirm({ title: `Close all books through ${v.date}?`, message: "This cannot be undone.", confirmLabel: "Close books", danger: true })) api("/accounting/closes/", { method: "POST", body: { date: v.date } }).then(() => done("Books closed.")).catch(fail); };
+  const expenseFields: FieldDef[] = [{ name: "date", label: "Expense date", type: "date", defaultValue: today() }, { name: "account", label: "Expense category", type: "select", options: accountOptions("expense") }, { name: "amount", label: "Amount", type: "number", min: 0.01, step: "0.01" }, { name: "payment_method", label: "Paid from", type: "select", defaultValue: "cash", options: [["cash", "Cash"], ["bank", "Bank"], ["mobile_money", "Mobile money"]] }, { name: "vendor", label: "Vendor name", required: false }, { name: "description", label: "Description", wide: true }];
+  const entryFields: FieldDef[] = [{ name: "description", label: "Description", wide: true }, { name: "date", label: "Entry date", type: "date", defaultValue: today() }, { name: "amount", label: "Amount", type: "number", min: 0.01, step: "0.01" }, { name: "debit", label: "Debit account", type: "select", options: accountOptions() }, { name: "credit", label: "Credit account", type: "select", options: accountOptions() }];
+  const tabs: [Tab, string][] = [["income", "Profit & loss"], ["branches", "Branches"], ...(full ? ([["sheet", "Balance sheet"], ["tb", "Trial balance"], ["cash", "Cash flow"], ["journal", "Journal"], ["expenses", "Expenses"], ["close", "Daily close"]] as [Tab, string][]) : [])];
+  const dates = (both: boolean) => <div className="flex flex-wrap items-end gap-3">{both && <label className="field-label">From<input type="date" className="mt-1.5 block" value={from} onChange={(e) => setFrom(e.target.value)} /></label>}<label className="field-label">{both ? "To" : "As of"}<input type="date" className="mt-1.5 block" value={to} onChange={(e) => setTo(e.target.value)} /></label></div>;
+  const state = (q: { isLoading: boolean; isError: boolean; error: unknown; refetch: () => unknown }) => q.isLoading ? <Loading /> : q.isError ? <ErrorState onRetry={() => q.refetch()}>{errorMessage(q.error)}</ErrorState> : null;
   return (
-    <div className="space-y-4">
-      <PageHeader title="Accounting" subtitle="Ledger, expenses and financial statements." />
-      {!full && <p className="text-sm text-slate-600">Showing your branch only.</p>}
-      {msg && <p role={msg.ok ? "status" : "alert"} className={`alert ${msg.ok ? "alert-success" : "alert-error"}`}>{msg.t}</p>}
-      <div role="tablist" className="tablist">{tabs.filter((t) => t[2]).map(([k, label]) => <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)} className={`tab ${tab === k ? "tab-active" : ""}`}>{label}</button>)}</div>
-      {["income", "branches", "cash"].includes(tab) && <div className="flex gap-2 text-sm"><label>From<input type="date" className={`${inputCls} block`} value={from} onChange={(e) => setFrom(e.target.value)} /></label><label>To<input type="date" className={`${inputCls} block`} value={to} onChange={(e) => setTo(e.target.value)} /></label></div>}
-      {["sheet", "tb"].includes(tab) && <label className="block text-sm">As of<input type="date" className={`${inputCls} block`} value={to} onChange={(e) => setTo(e.target.value)} /></label>}
+    <div className="space-y-5">
+      <PageHeader title="Accounting" subtitle={full ? "Ledger, expenses and financial statements." : "Showing your branch only."}
+        actions={manage && (tab === "expenses" ? <button className="btn btn-primary" onClick={() => setDialog("expense")}><Plus size={16} aria-hidden />Record expense</button> : tab === "journal" ? <button className="btn btn-primary" onClick={() => setDialog("entry")}><Plus size={16} aria-hidden />New journal entry</button> : tab === "close" ? <button className="btn btn-primary" onClick={closeDay}><Lock size={16} aria-hidden />Close a day</button> : null)} />
+      <Tabs tabs={tabs} value={tab} onChange={setTab} />
+      {["income", "branches", "cash"].includes(tab) && dates(true)}
+      {["sheet", "tb"].includes(tab) && dates(false)}
 
-      {tab === "income" && income.data && <table className="w-full max-w-xl bg-white text-sm"><tbody>
-        <tr className="font-semibold"><td colSpan={2}>Revenue</td></tr><Rows rows={income.data.revenue} /><Tot label="Net revenue" v={income.data.net_revenue} strong />
-        <tr className="font-semibold"><td colSpan={2}>Cost of sales</td></tr><Rows rows={income.data.cost_of_sales} /><Tot label="Gross profit" v={income.data.gross_profit} strong />
-        <tr className="font-semibold"><td colSpan={2}>Operating expenses</td></tr><Rows rows={income.data.operating_expenses} /><Tot label="Total expenses" v={income.data.operating_expenses_total} /><Tot label="Net profit" v={income.data.net_profit} strong /></tbody></table>}
-      {tab === "branches" && branches.data && <div className="table-wrap"><table className="table"><thead><tr><th>Branch</th><th>Net revenue</th><th>Cost of sales</th><th>Gross profit</th><th>Expenses</th><th>Net profit</th></tr></thead><tbody>{branches.data.map((b) => <tr key={String(b.branch)}><td>{b.name}</td><td>{money(b.net_revenue)}</td><td>{money(b.cost_of_sales)}</td><td>{money(b.gross_profit)}</td><td>{money(b.operating_expenses)}</td><td>{money(b.net_profit)}</td></tr>)}</tbody></table></div>}
-      {tab === "sheet" && sheet.data && <div className="max-w-xl card p-4 text-sm "><table className="w-full"><tbody>
-        <tr className="font-semibold"><td colSpan={2}>Assets</td></tr><Rows rows={sheet.data.assets} /><Tot label="Total assets" v={sheet.data.total_assets} strong />
-        <tr className="font-semibold"><td colSpan={2}>Liabilities</td></tr><Rows rows={sheet.data.liabilities} /><Tot label="Total liabilities" v={sheet.data.total_liabilities} />
-        <tr className="font-semibold"><td colSpan={2}>Equity</td></tr><Rows rows={sheet.data.equity} /><tr><td className="py-1 pl-4">Current period earnings</td><td className="text-right">{money(sheet.data.current_earnings)}</td></tr><Tot label="Total equity" v={sheet.data.total_equity} /></tbody></table>
-        <p className={sheet.data.balanced ? "mt-2 text-green-700" : "mt-2 font-semibold text-red-700"}>{sheet.data.balanced ? "Balanced: assets = liabilities + equity." : "OUT OF BALANCE: contact support."}</p></div>}
-      {tab === "tb" && tb.data && <div className="table-wrap"><table className="table"><thead><tr><th>Account</th><th>Debit</th><th>Credit</th></tr></thead><tbody>{tb.data.rows.map((r) => <tr key={r.code}><td>{r.code} {r.name}</td><td>{Number(r.debit) ? money(r.debit) : ""}</td><td>{Number(r.credit) ? money(r.credit) : ""}</td></tr>)}<tr className="border-t font-semibold"><td>Totals {tb.data.balanced ? "(balanced)" : "(OUT OF BALANCE)"}</td><td>{money(tb.data.total_debit)}</td><td>{money(tb.data.total_credit)}</td></tr></tbody></table></div>}
-      {tab === "cash" && cash.data && <div className="max-w-xl card p-4 text-sm "><p>Opening cash: {money(cash.data.opening_cash)}</p><table className="my-2 w-full"><thead><tr className="text-left"><th>Source</th><th>In</th><th>Out</th><th>Net</th></tr></thead><tbody>{cash.data.by_source.map((r) => <tr key={r.source}><td>{r.source.replace(/_/g, " ")}</td><td>{money(r.inflow)}</td><td>{money(r.outflow)}</td><td>{money(r.net)}</td></tr>)}</tbody></table><p className="font-semibold">Closing cash: {money(cash.data.closing_cash)}</p><p className="text-slate-500">Cash includes cash on hand, mobile money clearing and bank.</p></div>}
-
-      {tab === "journal" && <>
-        {manage && <form onSubmit={(e) => { e.preventDefault(); setMsg(null); addEntry.mutate(); }} className="grid gap-2 card p-4  md:grid-cols-6"><h2 className="font-semibold md:col-span-6">Manual journal entry (two lines)</h2>
-          <input required className={`${inputCls} md:col-span-2`} placeholder="Enter the description" value={je.description} onChange={(e) => setJe({ ...je, description: e.target.value })} aria-label="Description" />
-          <input type="date" className={inputCls} value={je.date} onChange={(e) => setJe({ ...je, date: e.target.value })} aria-label="Date" />
-          {sel(je.a1, (v) => setJe({ ...je, a1: v }), "Debit account")}<input type="number" min="0.01" step="0.01" required className={inputCls} placeholder="Debit amount" value={je.d1} onChange={(e) => setJe({ ...je, d1: e.target.value, c2: e.target.value })} aria-label="Debit amount" />
-          {sel(je.a2, (v) => setJe({ ...je, a2: v }), "Credit account")}<input type="number" min="0.01" step="0.01" required className={inputCls} placeholder="Credit amount" value={je.c2} onChange={(e) => setJe({ ...je, c2: e.target.value })} aria-label="Credit amount" />
-          <button disabled={addEntry.isPending} className="btn btn-primary">Post entry</button></form>}
-        <div className="table-wrap"><table className="table"><thead><tr><th>Number</th><th>Date</th><th>Description</th><th>Source</th><th>Amount</th><th /></tr></thead>
-          <tbody>{journal.data?.results.map((e) => <tr key={e.id}><td>{e.number}</td><td>{e.date}</td><td>{e.description}</td><td>{e.source_type}</td><td>{money(e.total)}</td><td>{manage && ["manual", "expense"].includes(e.source_type) && !e.reversed && <button className="btn-link" onClick={() => reverse(e.id, e.number, "entry")}>Reverse</button>}{e.reversed && <em>reversed</em>}</td></tr>)}</tbody></table></div></>}
-      {tab === "expenses" && <>
-        {manage && <form onSubmit={(e) => { e.preventDefault(); setMsg(null); addExpense.mutate(); }} className="grid gap-2 card p-4  md:grid-cols-6"><h2 className="font-semibold md:col-span-6">Record an expense</h2>
-          <input type="date" className={inputCls} value={exp.date} onChange={(e) => setExp({ ...exp, date: e.target.value })} aria-label="Date" />
-          {sel(exp.account, (v) => setExp({ ...exp, account: v }), "Expense category", "expense")}
-          <input required type="number" min="0.01" step="0.01" className={inputCls} placeholder="Enter the amount" value={exp.amount} onChange={(e) => setExp({ ...exp, amount: e.target.value })} aria-label="Amount" />
-          <select aria-label="Paid from" className={inputCls} value={exp.payment_method} onChange={(e) => setExp({ ...exp, payment_method: e.target.value })}><option value="cash">Cash</option><option value="bank">Bank</option><option value="mobile_money">Mobile money</option></select>
-          <input required className={`${inputCls} md:col-span-2`} placeholder="Enter the description" value={exp.description} onChange={(e) => setExp({ ...exp, description: e.target.value })} aria-label="Description" />
-          <button disabled={addExpense.isPending} className="btn btn-primary">Record expense</button></form>}
-        <div className="table-wrap"><table className="table"><thead><tr><th>Date</th><th>Category</th><th>Description</th><th>Amount</th><th>Paid by</th><th>Status</th><th /></tr></thead>
-          <tbody>{expenses.data?.results.map((x) => <tr key={x.id}><td>{x.date}</td><td>{x.account_name}</td><td>{x.description}</td><td>{money(x.amount)}</td><td>{x.payment_method}</td><td><StatusBadge status={x.status} /></td><td>{manage && x.status === "posted" && <button className="btn-link" onClick={() => reverse(x.id, `expense ${x.id}`, "expense")}>Reverse</button>}</td></tr>)}</tbody></table></div></>}
-      {tab === "close" && <div className="space-y-2">{manage && <button className="btn btn-primary" onClick={closeDay}>Close a day</button>}
-        {closes.data?.length === 0 && <EmptyState>No days closed yet.</EmptyState>}<ul className="text-sm">{closes.data?.map((c) => <li key={c.date}>{c.date}: net profit {money(c.summary.net_profit)} · closing cash {money(c.summary.closing_cash)} · closed by {c.closed_by}</li>)}</ul></div>}
+      {tab === "income" && (state(income) ?? (income.data && <>
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><StatCard label="Net revenue" value={money(income.data.net_revenue)} icon={CircleDollarSign} /><StatCard label="Gross profit" value={money(income.data.gross_profit)} icon={TrendingUp} tone="info" /><StatCard label="Operating expenses" value={money(income.data.operating_expenses_total)} icon={TrendingDown} tone="warning" /><StatCard label="Net profit" value={money(income.data.net_profit)} icon={Banknote} tone={Number(income.data.net_profit) < 0 ? "danger" : "navy"} /></div>
+        <div className="grid items-start gap-5 xl:grid-cols-[1.4fr_1fr]">
+          <Statement sections={[{ title: "Revenue", rows: income.data.revenue, totals: [["Net revenue", income.data.net_revenue]] }, { title: "Cost of sales", rows: income.data.cost_of_sales, totals: [["Gross profit", income.data.gross_profit]] }, { title: "Operating expenses", rows: income.data.operating_expenses, totals: [["Total expenses", income.data.operating_expenses_total], ["Net profit", income.data.net_profit]] }]} />
+          <ChartCard title="Where the money went" subtitle="Operating expenses in this period"><DonutChart items={income.data.operating_expenses.map((r) => ({ label: r.name, value: r.amount }))} format={(n) => money(n)} centerLabel="Expenses" /></ChartCard>
+        </div></>))}
+      {tab === "branches" && (state(branches) ?? <>
+        <ChartCard title="Net revenue by branch"><RankBars items={(branches.data ?? []).map((b) => ({ label: b.name, value: b.net_revenue }))} format={(n) => money(n)} /></ChartCard>
+        <DataTable rows={branches.data} rowKey={(b) => String(b.branch)} columns={[{ key: "name", header: "Branch", render: (b) => <b>{b.name}</b> }, ...(["net_revenue", "cost_of_sales", "gross_profit", "operating_expenses", "net_profit"] as const).map((k) => ({ key: k, header: words(k), align: "right" as const, render: (b: BranchRow) => money(b[k]), sort: (b: BranchRow) => Number(b[k]) }))]} /></>)}
+      {tab === "sheet" && (state(sheet) ?? (sheet.data && <div className="max-w-3xl"><Statement balanced={sheet.data.balanced} sections={[{ title: "Assets", rows: sheet.data.assets, totals: [["Total assets", sheet.data.total_assets]] }, { title: "Liabilities", rows: sheet.data.liabilities, totals: [["Total liabilities", sheet.data.total_liabilities]] }, { title: "Equity", rows: [...sheet.data.equity, { code: "", name: "Current period earnings", amount: sheet.data.current_earnings }], totals: [["Total equity", sheet.data.total_equity]] }]} /></div>))}
+      {tab === "tb" && (state(tb) ?? (tb.data && <><DataTable rows={tb.data.rows} rowKey={(r) => r.code} pageSize={15} search={(r) => `${r.code} ${r.name}`} columns={[{ key: "account", header: "Account", render: (r) => <><b>{r.code}</b> {r.name}</> }, { key: "debit", header: "Debit", align: "right", render: (r) => Number(r.debit) ? money(r.debit) : "" }, { key: "credit", header: "Credit", align: "right", render: (r) => Number(r.credit) ? money(r.credit) : "" }]} />
+        <p className={`alert ${tb.data.balanced ? "alert-success" : "alert-error"}`}>Total debit {money(tb.data.total_debit)} · total credit {money(tb.data.total_credit)} · {tb.data.balanced ? "balanced" : "OUT OF BALANCE"}</p></>))}
+      {tab === "cash" && (state(cash) ?? (cash.data && <>
+        <div className="grid gap-4 sm:grid-cols-3"><StatCard label="Opening cash" value={money(cash.data.opening_cash)} icon={Banknote} tone="navy" /><StatCard label="Net change" value={money(cash.data.net_change)} icon={Number(cash.data.net_change) < 0 ? TrendingDown : TrendingUp} tone={Number(cash.data.net_change) < 0 ? "danger" : "primary"} /><StatCard label="Closing cash" value={money(cash.data.closing_cash)} icon={CircleDollarSign} hint="Cash on hand, mobile money clearing and bank" /></div>
+        <ChartCard title="Money in and out by source" legend={[{ label: "In", color: "var(--series-1)" }, { label: "Out", color: "var(--series-2)" }]}><TrendChart kind="column" rows={cash.data.by_source.map((r) => ({ source: words(r.source), inflow: r.inflow, outflow: r.outflow }))} x="source" series={[{ key: "inflow", label: "In" }, { key: "outflow", label: "Out" }]} format={(n) => money(n)} /></ChartCard>
+        <DataTable rows={cash.data.by_source} rowKey={(r) => r.source} columns={[{ key: "source", header: "Source", render: (r) => <span className="capitalize">{words(r.source)}</span> }, { key: "inflow", header: "In", align: "right", render: (r) => money(r.inflow) }, { key: "outflow", header: "Out", align: "right", render: (r) => money(r.outflow) }, { key: "net", header: "Net", align: "right", render: (r) => <b>{money(r.net)}</b> }]} /></>))}
+      {tab === "journal" && full && <ServerTable<Entry> queryKey={["acc-journal"]} path="/accounting/journal-entries/" rowKey={(e) => e.id} empty="No journal entries."
+        columns={[{ key: "number", header: "Number", render: (e) => <b>{e.number}</b> }, { key: "date", header: "Date", render: (e) => day(e.date) }, { key: "description", header: "Description", render: (e) => e.description }, { key: "source", header: "Source", render: (e) => <span className="badge badge-neutral">{words(e.source_type)}</span> }, { key: "total", header: "Amount", align: "right", render: (e) => <b>{money(e.total)}</b> },
+          { key: "actions", header: "Actions", align: "right", render: (e) => e.reversed ? <StatusBadge status="reversed" tone="neutral" /> : manage && ["manual", "expense"].includes(e.source_type) && <button className="btn-link btn-link-danger" onClick={() => reverse(`/accounting/journal-entries/${e.id}/reverse/`, e.number)}>Reverse</button> }]} />}
+      {tab === "expenses" && full && <ServerTable<Expense> queryKey={["acc-expenses"]} path="/accounting/expenses/" rowKey={(x) => x.id} empty="No expenses recorded."
+        columns={[{ key: "date", header: "Date", render: (x) => day(x.date) }, { key: "category", header: "Category", render: (x) => <b>{x.account_name}</b> }, { key: "description", header: "Description", render: (x) => x.description }, { key: "method", header: "Paid from", render: (x) => <span className="capitalize">{words(x.payment_method)}</span> }, { key: "status", header: "Status", render: (x) => <StatusBadge status={x.status} /> }, { key: "amount", header: "Amount", align: "right", render: (x) => <b>{money(x.amount)}</b> },
+          { key: "actions", header: "Actions", align: "right", render: (x) => manage && x.status === "posted" && <button className="btn-link btn-link-danger" onClick={() => reverse(`/accounting/expenses/${x.id}/reverse/`, `this expense`)}>Reverse</button> }]} />}
+      {tab === "close" && <DataTable rows={closes.data} loading={closes.isLoading} rowKey={(c) => c.date} empty="No days closed yet." columns={[{ key: "date", header: "Closed through", render: (c) => <b>{day(c.date)}</b>, sort: (c) => c.date }, { key: "profit", header: "Net profit", align: "right", render: (c) => money(c.summary.net_profit) }, { key: "cash", header: "Closing cash", align: "right", render: (c) => money(c.summary.closing_cash) }, { key: "by", header: "Closed by", render: (c) => c.closed_by ?? "—" }]} />}
+      {dialog === "expense" && <FormModal title="Record an expense" size="lg" submitLabel="Record expense" fields={expenseFields} onClose={() => setDialog(null)} onSubmit={async (v) => { await api("/accounting/expenses/", { method: "POST", body: v }); done("Expense recorded."); }} />}
+      {dialog === "entry" && <FormModal title="Manual journal entry" size="lg" submitLabel="Post entry" description="The same amount is posted to both accounts, so the entry always balances." fields={entryFields} onClose={() => setDialog(null)}
+        onSubmit={async (v) => { await api("/accounting/journal-entries/", { method: "POST", headers: { "Idempotency-Key": crypto.randomUUID() }, body: { description: v.description, date: v.date, lines: [{ account: v.debit, debit: v.amount }, { account: v.credit, credit: v.amount }] } }); done("Journal entry posted."); }} />}
     </div>
   );
 }

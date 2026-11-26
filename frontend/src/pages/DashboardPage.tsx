@@ -1,14 +1,11 @@
 import { Navigate } from "react-router-dom";
-import { Loading } from "../components/ui";
+import { PageLoader } from "../components/brand/Brand";
 import { useAuth } from "../lib/auth";
+import { homeFor } from "../lib/site";
 
 /** Generic post-sign-in address: sends each user to the right home for their account. */
 export default function DashboardPage() {
   const { user, loading } = useAuth();
-  if (loading) return <div className="p-8"><Loading /></div>;
-  if (!user) return <Navigate to="/" replace />;
-  if (user.must_change_password) return <Navigate to="/change-password" replace />;
-  if (user.is_platform_admin) return <Navigate to="/platform/dashboard" replace />;
-  if (!user.tenant_slug) return <Navigate to="/" replace />;
-  return <Navigate to={user.role === "customer" ? `/${user.tenant_slug}` : `/${user.tenant_slug}/admin/dashboard`} replace />;
+  if (loading) return <PageLoader />;
+  return <Navigate to={user ? homeFor(user) : "/"} replace />;
 }

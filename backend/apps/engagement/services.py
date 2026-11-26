@@ -59,6 +59,10 @@ def book(*, customer, service: PharmacyService, branch, start_at: datetime, note
     a = Appointment.objects.create(customer=customer, service=service, branch=branch, start_at=start_at, end_at=end_at, customer_note=note[:300])
     audit.record("appointment.requested", actor=customer, target=a, branch_id=branch.pk)
     notify_topic(a.tenant_id, branch.pk, "orders", "appointment.requested", {"id": a.pk, "kind": "appointment"})
+    from apps.notifications import inapp
+    inapp.push_staff(a.tenant_id, "engagement.manage", branch.pk, kind="appointment", title=f"Appointment request: {service.name}",
+                     body=f"{customer.full_name} asked for {timezone.localtime(start_at):%d %b %Y %H:%M} at {branch.name}.", link="/engagement")
+    inapp.push([customer], kind="appointment", title=f"Appointment requested: {service.name}", body="The pharmacy will confirm your booking.", link="/care")
     _mail(customer.email, f"Appointment request received: {service.name}", f"We received your request for {service.name} on {timezone.localtime(start_at):%Y-%m-%d %H:%M}. We will confirm it shortly.", "appointment_requested")
     return a
 

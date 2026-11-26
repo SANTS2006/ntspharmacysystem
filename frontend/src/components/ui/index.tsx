@@ -1,6 +1,11 @@
 /** Shared UI primitives for NTS Pharmacy System. Presentational only: no data fetching happens here. */
-import { AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, Inbox, Info, X, XCircle, type LucideIcon } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Inbox, Info, Trash2, X, XCircle, type LucideIcon } from "lucide-react";
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
+import { Link } from "react-router-dom";
+import { ApiError } from "../../lib/api";
+import { Spinner } from "../brand/Brand";
+import { FormFields, initialValues, type FieldDef, type Values } from "./forms";
 
 export function PageHeader({ title, subtitle, actions }: { title: ReactNode; subtitle?: ReactNode; actions?: ReactNode }) {
   return (
@@ -14,16 +19,9 @@ export function PageHeader({ title, subtitle, actions }: { title: ReactNode; sub
   );
 }
 
-/** Skeleton placeholder announced to screen readers as "Loading". */
-export function Loading({ rows = 4 }: { rows?: number }) {
-  return (
-    <div role="status" aria-label="Loading" className="space-y-3 py-2">
-      <span className="sr-only">Loading…</span>
-      <div className="skeleton h-7 w-48" />
-      {Array.from({ length: rows }, (_, i) => <div key={i} className="skeleton h-11 w-full" />)}
-    </div>
-  );
-}
+export { Loading, TableLoader, PageLoader, Spinner } from "../brand/Brand";
+export * from "./forms";
+export * from "./data";
 
 export function EmptyState({ children, icon: Icon = Inbox, action }: { children: ReactNode; icon?: LucideIcon; action?: ReactNode }) {
   return (
@@ -59,30 +57,20 @@ export function StatusBadge({ status, tone }: { status: string; tone?: ReturnTyp
   return <span className={`badge badge-${tone ?? statusTone(status)}`}>{status.replace(/_/g, " ")}</span>;
 }
 
-export function Pagination({ page, setPage, hasPrev, hasNext, total }: { page: number; setPage: (n: number) => void; hasPrev: boolean; hasNext: boolean; total?: number }) {
-  return (
-    <nav aria-label="Pagination" className="flex flex-wrap items-center justify-between gap-2">
-      <p className="text-sm text-slate-500">Page {page}{total !== undefined ? ` · ${total.toLocaleString()} records` : ""}</p>
-      <div className="flex gap-2">
-        <button type="button" disabled={!hasPrev} onClick={() => setPage(page - 1)} className="btn btn-outline btn-sm"><ChevronLeft size={15} aria-hidden />Previous</button>
-        <button type="button" disabled={!hasNext} onClick={() => setPage(page + 1)} className="btn btn-outline btn-sm">Next<ChevronRight size={15} aria-hidden /></button>
-      </div>
-    </nav>
-  );
-}
-
-export function StatCard({ label, value, icon: Icon, tone = "primary", hint }: { label: string; value: ReactNode; icon?: LucideIcon; tone?: "primary" | "info" | "warning" | "danger" | "navy"; hint?: ReactNode }) {
-  const tones = { primary: "bg-teal-50 text-teal-700", info: "bg-sky-50 text-sky-700", warning: "bg-amber-50 text-amber-700", danger: "bg-red-50 text-red-700", navy: "bg-slate-100 text-navy" };
-  return (
-    <div className="card flex items-start justify-between gap-3 p-4">
+export function StatCard({ label, value, icon: Icon, tone = "primary", hint, to }: { label: string; value: ReactNode; icon?: LucideIcon; tone?: "primary" | "info" | "warning" | "danger" | "navy"; hint?: ReactNode; to?: string }) {
+  const tones = { primary: "bg-teal-50 text-teal-700", info: "bg-sky-50 text-sky-700", warning: "bg-amber-50 text-amber-700", danger: "bg-red-50 text-red-700", navy: "bg-slate-100 text-slate-700" };
+  const body = (
+    <>
       <div className="min-w-0">
-        <p className="text-[0.8125rem] font-medium text-muted">{label}</p>
-        <p className="mt-1 truncate text-2xl font-bold tabular-nums text-ink">{value}</p>
-        {hint && <p className="mt-1 text-xs text-muted">{hint}</p>}
+        <p className="text-[0.8125rem] font-semibold text-muted">{label}</p>
+        <p className="mt-1 truncate text-[1.65rem] font-bold leading-tight text-ink">{value}</p>
+        {hint && <p className="mt-1.5 text-xs text-muted">{hint}</p>}
       </div>
-      {Icon && <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-lg ${tones[tone]}`}><Icon size={19} aria-hidden /></span>}
-    </div>
+      {Icon && <span className={`grid h-11 w-11 shrink-0 place-items-center rounded-xl ${tones[tone]}`}><Icon size={20} aria-hidden /></span>}
+    </>
   );
+  const cls = "card card-hover animate-rise flex items-start justify-between gap-3 p-4";
+  return to ? <Link to={to} className={cls}>{body}</Link> : <div className={cls}>{body}</div>;
 }
 
 /** Horizontal bar chart for real values returned by the API (no chart dependency). */
@@ -121,22 +109,70 @@ export function Modal({ title, onClose, children, footer, size = "md" }: { title
     document.body.style.overflow = "hidden";
     return () => { document.removeEventListener("keydown", onKey); document.body.style.overflow = ""; prev?.focus(); };
   }, []);
-  return (
-    <div className="animate-fade fixed inset-0 z-[80] grid place-items-end bg-slate-900/50 p-0 sm:place-items-center sm:p-4" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div ref={ref} role="dialog" aria-modal="true" aria-label={title} tabIndex={-1} className={`animate-pop flex max-h-[90vh] w-full flex-col rounded-t-2xl bg-white shadow-pop outline-none sm:rounded-2xl ${size === "lg" ? "sm:max-w-3xl" : "sm:max-w-md"}`}>
+  return createPortal(
+    <div className="backdrop animate-fade fixed inset-0 z-[80] grid place-items-end p-0 sm:place-items-center sm:p-4" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div ref={ref} role="dialog" aria-modal="true" aria-label={title} tabIndex={-1} className={`animate-pop flex max-h-[92vh] w-full flex-col border border-line rounded-t-2xl bg-white shadow-pop outline-none sm:rounded-2xl ${size === "lg" ? "sm:max-w-3xl" : "sm:max-w-md"}`}>
         <header className="flex items-center justify-between gap-3 border-b border-line px-5 py-3.5"><h2 className="section-title">{title}</h2><button onClick={onClose} aria-label="Close" className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"><X size={18} /></button></header>
         <div className="overflow-y-auto px-5 py-4">{children}</div>
         {footer && <footer className="flex flex-wrap justify-end gap-2 border-t border-line px-5 py-3.5">{footer}</footer>}
       </div>
-    </div>
+    </div>, document.body);
+}
+
+// ---------- form dialogs ----------
+const apiErrors = (e: unknown): { message: string; fields: Record<string, string> } => {
+  if (e instanceof ApiError) {
+    const fields: Record<string, string> = {};
+    const d = e.details;
+    if (d && typeof d === "object" && !Array.isArray(d)) for (const [k, v] of Object.entries(d)) fields[k] = Array.isArray(v) ? v.join(" ") : typeof v === "string" ? v : JSON.stringify(v);
+    return { message: e.message, fields };
+  }
+  return { message: e instanceof Error ? e.message : "Something went wrong. Please try again.", fields: {} };
+};
+const sentence = (message: string, fields: Record<string, string>) => {
+  const extra = Object.entries(fields).map(([k, v]) => (["detail", "non_field_errors"].includes(k) ? v : `${k.replace(/_/g, " ")}: ${v}`)).join(" ");
+  return extra && !message.includes(extra) ? `${message} ${extra}` : message;
+};
+/** One readable sentence for any API error. */
+export const errorMessage = (e: unknown): string => { const { message, fields } = apiErrors(e); return sentence(message, fields); };
+
+/** Add / edit dialog. `onSubmit` may call the API: errors are shown inside the dialog and it only closes on success. */
+export function FormModal({ title, description, fields, submitLabel = "Save", danger, size, onSubmit, onClose, children }: {
+  title: string; description?: ReactNode; fields: FieldDef[]; submitLabel?: string; danger?: boolean; size?: "md" | "lg";
+  onSubmit: (values: Values, files: Record<string, File | null>) => unknown; onClose: () => void; children?: ReactNode;
+}) {
+  const [values, setValues] = useState<Values>(() => initialValues(fields));
+  const [files, setFiles] = useState<Record<string, File | null>>({});
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState<{ message: string; fields: Record<string, string> } | null>(null);
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true); setFailure(null);
+    try { await onSubmit(values, files); onClose(); }
+    catch (err) { setFailure(apiErrors(err)); setBusy(false); }
+  };
+  const unplaced = Object.fromEntries(Object.entries(failure?.fields ?? {}).filter(([k]) => !fields.some((f) => f.name === k)));
+  return (
+    <Modal title={title} onClose={onClose} size={size ?? (fields.length > 4 ? "lg" : "md")}>
+      <form onSubmit={submit} className="space-y-4">
+        {description && <div className="text-sm text-muted">{description}</div>}
+        {failure && <p role="alert" className="alert alert-error">{sentence(failure.message, unplaced)}</p>}
+        <FormFields fields={fields} values={values} errors={failure?.fields} set={(n, v) => setValues((x) => ({ ...x, [n]: v }))} setFile={(n, f) => setFiles((x) => ({ ...x, [n]: f }))} />
+        {children}
+        <div className="flex justify-end gap-2 border-t border-line pt-4">
+          <button type="button" className="btn btn-outline" onClick={onClose}>Cancel</button>
+          <button type="submit" disabled={busy} className={`btn ${danger ? "btn-danger" : "btn-primary"}`}>{busy && <Spinner />}{busy ? "Saving…" : submitLabel}</button>
+        </div>
+      </form>
+    </Modal>
   );
 }
 
 // ---------- confirmation dialogs and toasts ----------
 interface ConfirmOptions { title: string; message?: ReactNode; confirmLabel?: string; danger?: boolean }
-export interface PromptField { name: string; label: string; type?: "text" | "number" | "email" | "textarea" | "select"; options?: [string, string][]; defaultValue?: string; required?: boolean; placeholder?: string; min?: number; max?: number; step?: string }
+export type PromptField = FieldDef;
 interface PromptOptions { title: string; message?: ReactNode; fields: PromptField[]; confirmLabel?: string; danger?: boolean }
-type Answers = Record<string, string>;
+type Answers = Values;
 type Toast = { id: number; text: string; kind: "success" | "error" | "info" };
 interface Feedback { prompt: (o: PromptOptions) => Promise<Answers | null>; confirm: (o: ConfirmOptions) => Promise<boolean>; toast: (text: string, kind?: Toast["kind"]) => void }
 
@@ -145,28 +181,6 @@ const FeedbackCtx = createContext<Feedback>({ prompt: async () => null, confirm:
 export const useConfirm = () => useContext(FeedbackCtx).confirm;
 export const usePrompt = () => useContext(FeedbackCtx).prompt;
 export const useToast = () => useContext(FeedbackCtx).toast;
-
-/** A small form in a dialog: replaces chains of window.prompt() with labelled, validated fields. */
-function PromptDialog({ options, onDone }: { options: PromptOptions; onDone: (v: Answers | null) => void }) {
-  const [values, setValues] = useState<Answers>(() => Object.fromEntries(options.fields.map((f) => [f.name, f.defaultValue ?? ""])));
-  return (
-    <Modal title={options.title} onClose={() => onDone(null)}>
-      <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); onDone(values); }}>
-        {options.message && <div className="text-sm text-slate-600">{options.message}</div>}
-        {options.fields.map((f, i) => {
-          const common = { required: f.required ?? true, value: values[f.name], placeholder: f.placeholder, autoFocus: i === 0, className: "mt-1 w-full p-2", onChange: (e: { target: { value: string } }) => setValues((v) => ({ ...v, [f.name]: e.target.value })) };
-          return (
-            <label key={f.name} className="field-label">{f.label}
-              {f.type === "select" ? <select {...common}>{f.options?.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
-                : f.type === "textarea" ? <textarea {...common} rows={3} />
-                  : <input {...common} type={f.type ?? "text"} min={f.min} max={f.max} step={f.step} />}
-            </label>);
-        })}
-        <div className="flex justify-end gap-2 pt-2"><button type="button" className="btn btn-outline" onClick={() => onDone(null)}>Cancel</button><button type="submit" className={`btn ${options.danger ? "btn-danger" : "btn-primary"}`}>{options.confirmLabel ?? "Continue"}</button></div>
-      </form>
-    </Modal>
-  );
-}
 
 export function FeedbackProvider({ children }: { children: ReactNode }) {
   const [pending, setPending] = useState<(ConfirmOptions & { resolve: (v: boolean) => void }) | null>(null);
@@ -184,22 +198,23 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
   return (
     <FeedbackCtx.Provider value={{ prompt, confirm, toast }}>
       {children}
-      {asking && <PromptDialog key={asking.key} options={asking} onDone={(v) => { const done = asking.resolve; setAsking(null); done(v); }} />}
+      {asking && <FormModal key={asking.key} title={asking.title} description={asking.message} fields={asking.fields} submitLabel={asking.confirmLabel ?? "Continue"} danger={asking.danger}
+        onSubmit={(v) => { asking.resolve(v); }} onClose={() => { asking.resolve(null); setAsking(null); }} />}
       {pending && (
         <Modal title={pending.title} onClose={() => answer(false)} footer={<>
           <button className="btn btn-outline" onClick={() => answer(false)}>Cancel</button>
           <button className={`btn ${pending.danger ? "btn-danger" : "btn-primary"}`} onClick={() => answer(true)}>{pending.confirmLabel ?? "Confirm"}</button></>}>
           <div className="flex gap-3">
-            <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-full ${pending.danger ? "bg-red-50 text-red-600" : "bg-amber-50 text-amber-600"}`}><AlertTriangle size={20} aria-hidden /></span>
+            <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-full ${pending.danger ? "bg-red-50 text-red-600" : "bg-amber-50 text-amber-600"}`}>{/delete|remove/i.test(pending.title) ? <Trash2 size={20} aria-hidden /> : <AlertTriangle size={20} aria-hidden />}</span>
             <div className="text-sm text-slate-600">{pending.message ?? "Please confirm that you want to continue."}</div>
           </div>
         </Modal>
       )}
-      <div aria-live="polite" className="pointer-events-none fixed right-4 top-4 z-[90] flex w-[min(22rem,calc(100vw-2rem))] flex-col gap-2">
+      <div aria-live="polite" className="pointer-events-none fixed bottom-4 right-4 z-[130] flex w-[min(22rem,calc(100vw-2rem))] flex-col gap-2">
         {toasts.map((t) => {
           const I = t.kind === "success" ? CheckCircle2 : t.kind === "error" ? XCircle : Info;
           return (
-            <div key={t.id} className="animate-pop pointer-events-auto flex items-start gap-2.5 rounded-xl border border-line bg-white p-3 text-sm shadow-pop">
+            <div key={t.id} className="animate-pop pointer-events-auto flex items-start gap-2.5 rounded-xl border border-line bg-white p-3 text-sm text-ink shadow-pop">
               <I size={18} aria-hidden className={t.kind === "success" ? "text-success" : t.kind === "error" ? "text-danger" : "text-info"} />
               <span className="flex-1">{t.text}</span>
               <button aria-label="Dismiss notification" className="text-slate-400 hover:text-slate-700" onClick={() => setToasts((x) => x.filter((y) => y.id !== t.id))}><X size={15} /></button>

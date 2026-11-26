@@ -23,11 +23,23 @@ class UserSerializer(serializers.ModelSerializer):
     role = serializers.CharField(source="role.code", default=None)
     permissions = serializers.SerializerMethodField()
     tenant_slug = serializers.CharField(source="tenant.slug", default=None)
+    avatar = serializers.SerializerMethodField()
+    role_name = serializers.CharField(source="role.name", default=None)
+    branch_name = serializers.CharField(source="branch.name", default=None)
+    pharmacy_name = serializers.CharField(source="tenant.name", default=None)
+    has_password = serializers.SerializerMethodField()
 
     class Meta:
         model = User
         fields = ["id", "email", "full_name", "phone", "role", "permissions", "tenant_slug", "branch",
-                  "is_platform_admin", "email_verified", "must_change_password"]
+                  "is_platform_admin", "email_verified", "must_change_password",
+                  "avatar", "role_name", "branch_name", "pharmacy_name", "has_password", "date_joined"]
+
+    def get_avatar(self, user):
+        return user.avatar.url if user.avatar else None
+
+    def get_has_password(self, user):
+        return user.has_usable_password()
 
     def get_permissions(self, user):  # UI hint only; the backend re-checks every request
         return sorted(user.role.permissions) if user.role_id else []

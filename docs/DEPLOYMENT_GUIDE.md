@@ -51,5 +51,5 @@ PostgreSQL test run; concurrent sale/stock test on PostgreSQL; PostgreSQL row-le
 2. Render dashboard: New > Blueprint > select the repo. Fill every `sync: false` variable (same names as `backend/.env.example`).
 3. After the first deploy set `PLATFORM_BASE_DOMAIN` to your `onrender.com` host (or custom domain). Pharmacies are reached by path (`/pharmacy/<slug>`), so no wildcard DNS is needed.
 4. Run `python manage.py check_integrations` in the Render shell, then `send_test_email --to you@example.com`.
-5. Monime: register `https://<host>/api/v1/webhooks/monime/<slug>/` as the webhook URL, then `python manage.py configure_monime --pharmacy <slug>`.
+5. Monime: set `MONIME_SPACE_ID`, `MONIME_ACCESS_TOKEN` and `MONIME_WEBHOOK_SECRET` in Render, then create a webhook in Monime for `https://<host>/api/v1/webhooks/monime/` with the same secret (see PAYMENT_INTEGRATION.md).
 6. Security defaults in production: HTTPS redirect + HSTS, secure cookies, strict CSP for the app, Django admin disabled (`DJANGO_ADMIN_ENABLED`), restore disabled (`BACKUP_ALLOW_RESTORE`).

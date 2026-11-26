@@ -1,143 +1,191 @@
-import { zodResolver } from "@hookform/resolvers/zod";
+/** Administration: branches, staff, roles and the pharmacy's own settings. Buttons appear only for people who may use them. */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
-import { useForm } from "react-hook-form";
-import { z } from "zod";
-import { ApiError, api, openProtectedFile } from "../../lib/api";
+import { Building2, Check, ImageUp, Pencil, Plus, Power, QrCode, ShieldCheck, Users } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Avatar, ColorPicker, ErrorState, FormModal, Loading, Modal, PageHeader, Spinner, StatusBadge, errorMessage, placeholderFor, useConfirm, useToast, type FieldDef } from "../../components/ui";
+import { ServerTable, type ApiPage } from "../../components/ui/ServerTable";
+import { api, openProtectedFile } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
-import { EmptyState, Loading, PageHeader, StatusBadge, useConfirm, usePrompt } from "../../components/ui";
-
-interface Page<T> { count: number; next: string | null; previous: string | null; results: T[] }
-const errText = (e: unknown) => (e instanceof ApiError ? `${e.message} ${e.details ? JSON.stringify(e.details) : ""}` : "Request failed.");
-const inputCls = "mt-1 w-full px-3 py-2 font-normal";
-const Err = ({ m }: { m?: string }) => (m ? <span role="alert" className="block text-xs text-red-600">{m}</span> : null);
-const Pager = ({ page, setPage, d }: { page: number; setPage: (n: number) => void; d?: { next: string | null; previous: string | null } }) => (
-  <div className="flex items-center gap-2"><button disabled={!d?.previous} onClick={() => setPage(page - 1)} className="btn btn-outline btn-sm">Previous</button>
-    <span className="text-sm">Page {page}</span><button disabled={!d?.next} onClick={() => setPage(page + 1)} className="btn btn-outline btn-sm">Next</button></div>
-);
 
 // ---------------- Branches ----------------
-interface Branch { id: number; name: string; code: string; address: string; phone: string; status: string; manager: number | null }
-const branchSchema = z.object({ name: z.string().min(2, "Enter the branch name."), code: z.string().min(2, "Enter the branch code.").max(20), address: z.string().optional(), phone: z.string().optional() });
+export interface Branch { id: number; name: string; code: string; address: string; phone: string; email: string; status: string; manager: number | null }
+
+const branchFields = (b?: Branch): FieldDef[] => [
+  { name: "name", label: "Branch name", defaultValue: b?.name, maxLength: 150 }, { name: "code", label: "Branch code", defaultValue: b?.code, maxLength: 20 },
+  { name: "address", label: "Branch address", defaultValue: b?.address, required: false, wide: true },
+  { name: "phone", label: "Branch phone", type: "tel", defaultValue: b?.phone, required: false }, { name: "email", label: "Branch email", type: "email", defaultValue: b?.email, required: false },
+];
 
 export function Branches() {
-  const { user } = useAuth(); const qc = useQueryClient();
-  const canManage = user?.permissions.includes("branch.manage");
-  const [err, setErr] = useState<string | null>(null);
-  const q = useQuery({ queryKey: ["branches"], queryFn: () => api<Page<Branch>>("/branches/") });
-  const { register, handleSubmit, reset, formState: { errors } } = useForm<z.infer<typeof branchSchema>>({ resolver: zodResolver(branchSchema) });
-  const create = useMutation({ mutationFn: (v: object) => api("/branches/", { method: "POST", body: v }), onSuccess: () => { reset(); setErr(null); qc.invalidateQueries({ queryKey: ["branches"] }); }, onError: (e) => setErr(errText(e)) });
-  const toggle = useMutation({ mutationFn: (b: Branch) => api(`/branches/${b.id}/`, { method: "PATCH", body: { status: b.status === "active" ? "inactive" : "active" } }), onSuccess: () => qc.invalidateQueries({ queryKey: ["branches"] }), onError: (e) => setErr(errText(e)) });
+  const { can } = useAuth(); const qc = useQueryClient(); const toast = useToast(); const confirm = useConfirm();
+  const manage = can("branch.manage");
+  const [editing, setEditing] = useState<Branch | "new" | null>(null);
+  const done = (text: string) => { qc.invalidateQueries({ queryKey: ["branches"] }); toast(text); };
+  const toggle = async (b: Branch) => {
+    const off = b.status === "active";
+    if (!(await confirm({ title: `${off ? "Deactivate" : "Activate"} ${b.name}?`, message: off ? "No new sales or orders can be made at an inactive branch." : "The branch becomes available again.", confirmLabel: off ? "Deactivate" : "Activate", danger: off }))) return;
+    api(`/branches/${b.id}/`, { method: "PATCH", body: { status: off ? "inactive" : "active" } }).then(() => done("Branch updated.")).catch((e) => toast(errorMessage(e), "error"));
+  };
   return (
-    <div className="space-y-4">
-      <PageHeader title="Branches" subtitle="Locations your pharmacy operates from." />
-      {canManage && (
-        <form noValidate onSubmit={handleSubmit((v) => create.mutate(v))} className="grid gap-3 card p-4  md:grid-cols-4">
-          <label className="text-sm font-medium">Name <span aria-hidden className="text-red-600">*</span><input className={inputCls} placeholder="Enter the branch name" {...register("name")} /><Err m={errors.name?.message} /></label>
-          <label className="text-sm font-medium">Code <span aria-hidden className="text-red-600">*</span><input className={inputCls} placeholder="Enter the branch code" {...register("code")} /><Err m={errors.code?.message} /></label>
-          <label className="text-sm font-medium">Address<input className={inputCls} placeholder="Enter the branch address" {...register("address")} /></label>
-          <label className="text-sm font-medium">Phone<input className={inputCls} placeholder="Enter the branch phone" {...register("phone")} /></label>
-          <button disabled={create.isPending} className="btn btn-primary md:col-span-4 md:w-40">Add branch</button>
-        </form>)}
-      {err && <p role="alert" className="alert alert-error">{err}</p>}
-      {q.isLoading && <Loading />}{q.data?.results.length === 0 && <EmptyState>No branches.</EmptyState>}
-      {q.data && q.data.results.length > 0 && <div className="table-wrap"><table className="table"><thead><tr><th>Name</th><th>Code</th><th>Address</th><th>Status</th><th /></tr></thead>
-        <tbody>{q.data.results.map((b) => <tr key={b.id}><td>{b.name}</td><td>{b.code}</td><td>{b.address}</td><td><StatusBadge status={b.status} /></td>
-          <td><button className="btn-link mr-1" onClick={() => openProtectedFile(`/branches/${b.id}/qr/`).catch((e) => setErr(errText(e)))}>QR code</button>{canManage && <button onClick={() => toggle.mutate(b)} className="btn-link">{b.status === "active" ? "Deactivate" : "Activate"}</button>}</td></tr>)}</tbody></table></div>}
+    <div className="space-y-5">
+      <PageHeader title="Branches" subtitle="Locations your pharmacy operates from." actions={manage && <button className="btn btn-primary" onClick={() => setEditing("new")}><Plus size={16} aria-hidden />Add branch</button>} />
+      <ServerTable<Branch> queryKey={["branches"]} path="/branches/" rowKey={(b) => b.id} search="Enter your branch search" empty="No branches yet."
+        filters={[{ name: "status", label: "All statuses", options: [["active", "Active"], ["inactive", "Inactive"]] }]}
+        columns={[
+          { key: "name", header: "Branch", sort: (b) => b.name, render: (b) => <span className="flex items-center gap-3"><span className="grid h-10 w-10 place-items-center rounded-xl bg-teal-50 text-teal-700"><Building2 size={18} aria-hidden /></span><span><b className="block">{b.name}</b><span className="text-xs text-muted">{b.code}</span></span></span> },
+          { key: "address", header: "Address", render: (b) => b.address || "—" },
+          { key: "contact", header: "Contact", render: (b) => <>{b.phone || "—"}{b.email && <span className="block text-xs text-muted">{b.email}</span>}</> },
+          { key: "status", header: "Status", render: (b) => <StatusBadge status={b.status} /> },
+          { key: "actions", header: "Actions", align: "right", render: (b) => <span className="inline-flex gap-1.5">
+            <button className="btn-link" onClick={() => openProtectedFile(`/branches/${b.id}/qr/`).catch((e) => toast(errorMessage(e), "error"))}><QrCode size={13} aria-hidden />QR menu</button>
+            {manage && <><button className="btn-link" onClick={() => setEditing(b)}><Pencil size={13} aria-hidden />Edit</button><button className={`btn-link ${b.status === "active" ? "btn-link-danger" : ""}`} onClick={() => toggle(b)}><Power size={13} aria-hidden />{b.status === "active" ? "Deactivate" : "Activate"}</button></>}
+          </span> },
+        ]} />
+      {editing && <FormModal title={editing === "new" ? "Add branch" : `Edit ${editing.name}`} fields={branchFields(editing === "new" ? undefined : editing)} onClose={() => setEditing(null)} submitLabel={editing === "new" ? "Add branch" : "Save changes"}
+        onSubmit={async (v) => { await api(editing === "new" ? "/branches/" : `/branches/${editing.id}/`, { method: editing === "new" ? "POST" : "PATCH", body: v }); done(editing === "new" ? "Branch added." : "Branch updated."); }} />}
     </div>
   );
 }
 
 // ---------------- Staff ----------------
-interface Staff { id: number; email: string; full_name: string; role: string; role_name: string; branch: number | null; branch_name: string | null; is_active: boolean; must_change_password: boolean }
-interface Role { id: number; code: string; name: string; permissions: string[]; branch_scoped: boolean }
-const staffSchema = z.object({ full_name: z.string().min(2, "Enter the full name."), email: z.string().email("Enter a valid email address."), phone: z.string().optional(), role: z.string().min(1, "Select a role."), branch: z.string().optional(), use_invitation: z.boolean() });
+interface Staff { id: number; email: string; full_name: string; phone: string; role: string; role_name: string; branch: number | null; branch_name: string | null; is_active: boolean; must_change_password: boolean }
+export interface Role { id: number; code: string; name: string; permissions: string[]; branch_scoped: boolean }
+
+export function useBranchOptions(): [string, string][] {
+  const { can } = useAuth();
+  const q = useQuery({ queryKey: ["branches", "options"], queryFn: () => api<ApiPage<{ id: number; name: string }>>("/branches/?page_size=200"), enabled: can("branch.view") });
+  return useMemo(() => (q.data?.results ?? []).map((b) => [String(b.id), b.name] as [string, string]), [q.data]);
+}
 
 export function StaffPage() {
-  const promptFor = usePrompt(); const confirmDialog = useConfirm();
-  const { user } = useAuth(); const qc = useQueryClient();
-  const canManage = user?.permissions.includes("staff.manage");
-  const [q, setQ] = useState(""); const [page, setPage] = useState(1); const [err, setErr] = useState<string | null>(null); const [ok, setOk] = useState<string | null>(null);
-  const list = useQuery({ queryKey: ["staff", q, page], queryFn: () => api<Page<Staff>>(`/staff/?page=${page}&search=${encodeURIComponent(q)}`) });
+  const { user, can } = useAuth(); const qc = useQueryClient(); const toast = useToast(); const confirm = useConfirm();
+  const manage = can("staff.manage");
+  const [editing, setEditing] = useState<Staff | "new" | null>(null);
   const roles = useQuery({ queryKey: ["roles"], queryFn: () => api<Role[]>("/roles/") });
-  const branches = useQuery({ queryKey: ["branches"], queryFn: () => api<Page<Branch>>("/branches/"), enabled: !!user?.permissions.includes("branch.view") });
-  const { register, handleSubmit, reset, formState: { errors } } = useForm<z.infer<typeof staffSchema>>({ resolver: zodResolver(staffSchema), defaultValues: { use_invitation: true } });
-  const create = useMutation({
-    mutationFn: (v: z.infer<typeof staffSchema>) => api("/staff/", { method: "POST", body: { ...v, branch: v.branch ? Number(v.branch) : null } }),
-    onSuccess: () => { reset(); setErr(null); setOk("Staff member added. Onboarding email queued."); qc.invalidateQueries({ queryKey: ["staff"] }); }, onError: (e) => { setOk(null); setErr(errText(e)); },
-  });
-  const toggle = useMutation({ mutationFn: (s: Staff) => api(`/staff/${s.id}/`, { method: "PATCH", body: { is_active: !s.is_active } }), onSuccess: () => qc.invalidateQueries({ queryKey: ["staff"] }), onError: (e) => setErr(errText(e)) });
+  const branches = useBranchOptions();
+  const roleOptions = (roles.data ?? []).filter((r) => r.code !== "customer").map((r) => [r.code, r.name] as [string, string]);
+  const done = (text: string) => { qc.invalidateQueries({ queryKey: ["staff"] }); toast(text); };
+  const toggle = async (s: Staff) => {
+    const verb = s.is_active ? "Deactivate" : "Activate";
+    if (!(await confirm({ title: `${verb} ${s.full_name}?`, message: s.is_active ? "They will no longer be able to sign in." : "They will be able to sign in again.", confirmLabel: verb, danger: s.is_active }))) return;
+    api(`/staff/${s.id}/`, { method: "PATCH", body: { is_active: !s.is_active } }).then(() => done("Staff member updated.")).catch((e) => toast(errorMessage(e), "error"));
+  };
+  const fields = (s?: Staff): FieldDef[] => [
+    { name: "full_name", label: "Full name", defaultValue: s?.full_name }, { name: "email", label: "Email address", type: "email", defaultValue: s?.email },
+    { name: "phone", label: "Phone number", type: "tel", required: false, defaultValue: s?.phone },
+    ...(s && s.email === user?.email ? [] : [
+      { name: "role", label: "Role", type: "select" as const, options: roleOptions, defaultValue: s?.role },
+      { name: "branch", label: "Branch", type: "select" as const, required: false, options: [["", "No branch (whole pharmacy)"] as [string, string], ...branches], defaultValue: s?.branch ?? user?.branch ?? "", hint: "Required for branch-based roles" }]),
+    ...(s ? [] : [{ name: "use_invitation", label: "Send an invitation link (recommended)", type: "checkbox" as const, defaultValue: true }]),
+  ];
   return (
-    <div className="space-y-4">
-      <PageHeader title="Staff" subtitle="Invite team members and manage their access." />
-      {canManage && (
-        <form noValidate onSubmit={handleSubmit((v) => create.mutate(v))} className="grid gap-3 card p-4  md:grid-cols-3">
-          <label className="text-sm font-medium">Full name <span aria-hidden className="text-red-600">*</span><input className={inputCls} placeholder="Enter the full name" {...register("full_name")} /><Err m={errors.full_name?.message} /></label>
-          <label className="text-sm font-medium">Email <span aria-hidden className="text-red-600">*</span><input className={inputCls} placeholder="Enter the email address" {...register("email")} /><Err m={errors.email?.message} /></label>
-          <label className="text-sm font-medium">Phone<input className={inputCls} placeholder="Enter the phone number" {...register("phone")} /></label>
-          <label className="text-sm font-medium">Role <span aria-hidden className="text-red-600">*</span><select className={inputCls} {...register("role")}><option value="">Select a role</option>{roles.data?.filter((r) => r.code !== "customer").map((r) => <option key={r.code} value={r.code}>{r.name}</option>)}</select><Err m={errors.role?.message} /></label>
-          <label className="text-sm font-medium">Branch<select className={inputCls} {...register("branch")}><option value="">Select a branch</option>{branches.data?.results.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select></label>
-          <label className="flex items-center gap-2 self-end text-sm"><input type="checkbox" {...register("use_invitation")} /> Send invitation link (recommended)</label>
-          <button disabled={create.isPending} className="btn btn-primary md:w-40">{create.isPending ? "Adding…" : "Add staff"}</button>
-        </form>)}
-      {ok && <p role="status" className="alert alert-success">{ok}</p>}
-      {err && <p role="alert" className="alert alert-error">{err}</p>}
-      <input aria-label="Search staff" placeholder="Enter a name or email" value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} className="w-64 px-3 py-2" />
-      {list.isLoading && <Loading />}{list.data?.results.length === 0 && <EmptyState>No staff found.</EmptyState>}
-      {list.data && list.data.results.length > 0 && <div className="table-wrap"><table className="table"><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Branch</th><th>Status</th><th /></tr></thead>
-        <tbody>{list.data.results.map((s) => <tr key={s.id}><td>{s.full_name}</td><td>{s.email}</td><td>{s.role_name}</td><td>{s.branch_name ?? "—"}</td><td>{s.is_active ? (s.must_change_password ? "Invited" : "Active") : "Deactivated"}</td>
-          <td>{canManage && s.email !== user?.email && <button onClick={async () => { const verb = s.is_active ? "Deactivate" : "Activate"; if (await confirmDialog({ title: `${verb} ${s.full_name}?`, message: s.is_active ? "They will no longer be able to sign in." : "They will be able to sign in again.", confirmLabel: verb, danger: s.is_active })) toggle.mutate(s); }} className="btn-link">{s.is_active ? "Deactivate" : "Activate"}</button>}</td></tr>)}</tbody></table></div>}
-      <Pager page={page} setPage={setPage} d={list.data} />
+    <div className="space-y-5">
+      <PageHeader title="Staff" subtitle="Invite team members and manage their access." actions={manage && <button className="btn btn-primary" onClick={() => setEditing("new")}><Plus size={16} aria-hidden />Add staff member</button>} />
+      <ServerTable<Staff> queryKey={["staff"]} path="/staff/" rowKey={(s) => s.id} search="Enter your name or email search" empty="No staff found."
+        filters={[{ name: "role__code", label: "All roles", options: roleOptions }, { name: "is_active", label: "Any status", options: [["true", "Active"], ["false", "Deactivated"]] }]}
+        columns={[
+          { key: "name", header: "Name", sort: (s) => s.full_name, render: (s) => <span className="flex items-center gap-3"><Avatar name={s.full_name} size={38} /><span><b className="block">{s.full_name}</b><span className="text-xs text-muted">{s.email}</span></span></span> },
+          { key: "phone", header: "Phone", render: (s) => s.phone || "—" },
+          { key: "role", header: "Role", render: (s) => s.role_name, sort: (s) => s.role_name },
+          { key: "branch", header: "Branch", render: (s) => s.branch_name ?? "All branches" },
+          { key: "status", header: "Status", render: (s) => <StatusBadge status={s.is_active ? (s.must_change_password ? "invited" : "active") : "deactivated"} /> },
+          ...(manage ? [{ key: "actions", header: "Actions", align: "right" as const, render: (s: Staff) => <span className="inline-flex gap-1.5"><button className="btn-link" onClick={() => setEditing(s)}><Pencil size={13} aria-hidden />Edit</button>{s.email !== user?.email && <button className={`btn-link ${s.is_active ? "btn-link-danger" : ""}`} onClick={() => toggle(s)}><Power size={13} aria-hidden />{s.is_active ? "Deactivate" : "Activate"}</button>}</span> }] : []),
+        ]} />
+      {editing && <FormModal title={editing === "new" ? "Add staff member" : `Edit ${editing.full_name}`} fields={fields(editing === "new" ? undefined : editing)} onClose={() => setEditing(null)} submitLabel={editing === "new" ? "Add staff member" : "Save changes"}
+        onSubmit={async (v) => {
+          const body: Record<string, unknown> = { ...v };
+          if ("branch" in v) body.branch = v.branch ? Number(v.branch) : null;
+          if (editing === "new") body.use_invitation = v.use_invitation === "true";
+          await api(editing === "new" ? "/staff/" : `/staff/${editing.id}/`, { method: editing === "new" ? "POST" : "PATCH", body });
+          done(editing === "new" ? "Staff member added. Their onboarding email is on its way." : "Staff member updated.");
+        }} />}
     </div>
   );
 }
 
 // ---------------- Roles ----------------
+const pretty = (p: string) => p.split(".")[1].replace(/_/g, " ");
+
 export function RolesPage() {
-  const { user } = useAuth(); const qc = useQueryClient();
-  const canEdit = user?.permissions.includes("role.manage");
+  const { user, can } = useAuth(); const qc = useQueryClient(); const toast = useToast();
+  const edit = can("role.manage");
   const roles = useQuery({ queryKey: ["roles"], queryFn: () => api<Role[]>("/roles/") });
-  const [editing, setEditing] = useState<Role | null>(null); const [sel, setSel] = useState<string[]>([]); const [err, setErr] = useState<string | null>(null);
-  const save = useMutation({ mutationFn: () => api(`/roles/${editing!.id}/`, { method: "PATCH", body: { permissions: sel } }), onSuccess: () => { setEditing(null); setErr(null); qc.invalidateQueries({ queryKey: ["roles"] }); }, onError: (e) => setErr(errText(e)) });
-  const all = user?.permissions ?? [];
+  const [editing, setEditing] = useState<Role | null>(null); const [sel, setSel] = useState<string[]>([]);
+  const save = useMutation({ mutationFn: () => api(`/roles/${editing!.id}/`, { method: "PATCH", body: { permissions: sel } }), onSuccess: () => { setEditing(null); qc.invalidateQueries({ queryKey: ["roles"] }); toast("Role updated."); } });
+  const groups = useMemo(() => {
+    const out: Record<string, string[]> = {};
+    [...new Set([...(user?.permissions ?? []), ...(editing?.permissions ?? [])])].sort().forEach((p) => (out[p.split(".")[0]] ??= []).push(p));
+    return Object.entries(out);
+  }, [user, editing]);
+  if (roles.isLoading) return <Loading />;
   return (
-    <div className="space-y-4">
-      <PageHeader title="Roles & permissions" subtitle="Control what each role can see and do." />
-      {roles.isLoading && <Loading />}
-      <div className="grid gap-3 md:grid-cols-2">{roles.data?.map((r) => (
-        <article key={r.id} className="card p-4"><div className="flex justify-between"><h2 className="section-title">{r.name}</h2>
-          {canEdit && r.code !== "pharmacy_admin" && <button className="btn-link" onClick={() => { setEditing(r); setSel(r.permissions); }}>Edit</button>}</div>
-          <p className="mt-1 text-xs text-slate-600">{r.permissions.length ? r.permissions.join(", ") : "No permissions"}</p></article>))}</div>
+    <div className="space-y-5">
+      <PageHeader title="Roles & permissions" subtitle="People only see the modules and buttons their role allows." />
+      <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">{roles.data?.filter((r) => r.code !== "customer").map((r) => (
+        <article key={r.id} className="card card-hover flex flex-col p-5">
+          <div className="flex items-start justify-between gap-3"><span className="flex items-center gap-3"><span className="grid h-11 w-11 place-items-center rounded-xl bg-teal-50 text-teal-700"><ShieldCheck size={20} aria-hidden /></span><span><h2 className="section-title">{r.name}</h2><span className="text-xs text-muted">{r.branch_scoped ? "Limited to one branch" : "Whole pharmacy"}</span></span></span>
+            {edit && r.code !== "pharmacy_admin" && <button className="btn-link" onClick={() => { save.reset(); setEditing(r); setSel(r.permissions); }}><Pencil size={13} aria-hidden />Edit</button>}</div>
+          <p className="mt-4 text-sm font-semibold"><Users size={14} aria-hidden className="mr-1.5 inline" />{r.permissions.length} permissions</p>
+          <ul className="mt-2 flex flex-wrap gap-1.5">{r.permissions.slice(0, 12).map((p) => <li key={p} className="badge badge-neutral">{p.replace(".", ": ").replace(/_/g, " ")}</li>)}{r.permissions.length > 12 && <li className="badge badge-info">+{r.permissions.length - 12} more</li>}{!r.permissions.length && <li className="text-sm text-muted">No permissions</li>}</ul>
+        </article>))}</div>
       {editing && (
-        <div role="dialog" aria-label={`Edit ${editing.name}`} className="space-y-3 rounded-xl border bg-white p-4">
-          <h2 className="section-title">Edit {editing.name}</h2>
-          <p className="text-sm text-slate-600">Saving signs out everyone with this role so changes apply immediately. You can only grant permissions you hold.</p>
-          <div className="grid gap-1 sm:grid-cols-2 lg:grid-cols-3">{all.map((p) => <label key={p} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={sel.includes(p)} onChange={(e) => setSel(e.target.checked ? [...sel, p] : sel.filter((x) => x !== p))} />{p}</label>)}</div>
-          {err && <p role="alert" className="text-sm text-red-700">{err}</p>}
-          <div className="flex gap-2"><button onClick={() => save.mutate()} disabled={save.isPending} className="btn btn-primary">Save</button><button onClick={() => setEditing(null)} className="btn btn-outline btn-sm">Cancel</button></div>
-        </div>)}
+        <Modal title={`Edit ${editing.name}`} size="lg" onClose={() => setEditing(null)} footer={<><button className="btn btn-outline" onClick={() => setEditing(null)}>Cancel</button><button className="btn btn-primary" disabled={save.isPending} onClick={() => save.mutate()}>{save.isPending ? <Spinner /> : <Check size={16} aria-hidden />}Save permissions</button></>}>
+          <p className="text-sm text-muted">Saving signs out everyone with this role so changes apply immediately. You can only grant permissions you hold.</p>
+          {save.isError && <p role="alert" className="alert alert-error mt-3">{errorMessage(save.error)}</p>}
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">{groups.map(([group, list]) => (
+            <fieldset key={group} className="rounded-xl border border-line p-3"><legend className="px-1 text-sm font-bold capitalize">{group.replace(/_/g, " ")}</legend>
+              {list.map((p) => <label key={p} className="flex items-center gap-2.5 py-1 text-sm capitalize"><input type="checkbox" checked={sel.includes(p)} onChange={(e) => setSel(e.target.checked ? [...sel, p] : sel.filter((x) => x !== p))} />{pretty(p)}</label>)}
+            </fieldset>))}</div>
+        </Modal>)}
     </div>
   );
 }
 
-// ---------------- Settings ----------------
-const settingsSchema = z.object({ description: z.string().optional(), address: z.string().optional(), city: z.string().optional(), region: z.string().optional(), contact_email: z.union([z.literal(""), z.string().email("Enter a valid email address.")]), contact_phone: z.string().optional(), primary_color: z.string().regex(/^#[0-9A-Fa-f]{6}$/, "Enter a color like #059669."), secondary_color: z.string().regex(/^#[0-9A-Fa-f]{6}$/, "Enter a color like #142D3D.") });
+// ---------------- Pharmacy settings ----------------
+interface PharmacySettingsData { name: string; slug: string; logo: string | null; description: string; address: string; city: string; region: string; contact_email: string; contact_phone: string; primary_color: string; secondary_color: string }
+const TEXT_KEYS = ["description", "address", "city", "region", "contact_email", "contact_phone", "primary_color", "secondary_color"] as const;
+
 export function SettingsPage() {
-  const qc = useQueryClient(); const [msg, setMsg] = useState<string | null>(null);
-  const q = useQuery({ queryKey: ["tenant-settings"], queryFn: () => api<z.infer<typeof settingsSchema> & { name: string }>("/tenants/me/") });
-  const { register, handleSubmit, formState: { errors } } = useForm<z.infer<typeof settingsSchema>>({ resolver: zodResolver(settingsSchema), values: q.data });
-  const save = useMutation({ mutationFn: (v: object) => api("/tenants/me/", { method: "PATCH", body: v }), onSuccess: () => { setMsg("Saved."); qc.invalidateQueries({ queryKey: ["branding"] }); }, onError: (e) => setMsg(errText(e)) });
-  if (q.isLoading) return <Loading />;
-  const f = (k: keyof z.infer<typeof settingsSchema>, label: string, ph: string) => <label className="text-sm font-medium">{label}<input className={inputCls} placeholder={ph} {...register(k)} /><Err m={errors[k]?.message} /></label>;
+  const qc = useQueryClient(); const toast = useToast();
+  const q = useQuery({ queryKey: ["tenant-settings"], queryFn: () => api<PharmacySettingsData>("/tenants/me/") });
+  const [form, setForm] = useState<PharmacySettingsData | null>(null);
+  const [logo, setLogo] = useState<File | null>(null);
+  const [preview, setPreview] = useState<string | null>(null);
+  const file = useRef<HTMLInputElement>(null);
+  useEffect(() => { if (q.data) setForm(q.data); }, [q.data]);
+  useEffect(() => { if (!logo) { setPreview(null); return; } const url = URL.createObjectURL(logo); setPreview(url); return () => URL.revokeObjectURL(url); }, [logo]);
+  const save = useMutation({
+    mutationFn: () => { const fd = new FormData(); TEXT_KEYS.forEach((k) => fd.append(k, form![k] ?? "")); if (logo) fd.append("logo", logo); return api<PharmacySettingsData>("/tenants/me/", { method: "PATCH", body: fd }); },
+    onSuccess: (d) => { setLogo(null); qc.setQueryData(["tenant-settings"], d); qc.invalidateQueries({ queryKey: ["site"] }); toast("Pharmacy settings saved."); },
+    onError: (e) => toast(errorMessage(e), "error"),
+  });
+  if (q.isError) return <ErrorState onRetry={() => q.refetch()}>{errorMessage(q.error)}</ErrorState>;
+  if (!form) return <Loading />;
+  const text = (key: keyof PharmacySettingsData, label: string, type = "text") => <label className="field-label">{label}<input type={type} className="mt-1.5 w-full" placeholder={placeholderFor(label)} value={String(form[key] ?? "")} onChange={(e) => setForm({ ...form, [key]: e.target.value })} /></label>;
+  const picture = preview ?? form.logo;
   return (
-    <form noValidate onSubmit={handleSubmit((v) => { setMsg(null); save.mutate(v); })} className="grid max-w-3xl gap-3 card p-6  md:grid-cols-2">
-      <h1 className="text-2xl font-semibold md:col-span-2">Pharmacy settings — {q.data?.name}</h1>
-      {f("address", "Address", "Enter the pharmacy address")}{f("city", "City", "Enter the city")}{f("region", "Region", "Enter the region")}
-      {f("contact_email", "Contact email", "Enter the contact email")}{f("contact_phone", "Contact phone", "Enter the contact phone")}
-      {f("primary_color", "Primary color", "Enter the primary color")}{f("secondary_color", "Secondary color", "Enter the secondary color")}
-      <label className="text-sm font-medium md:col-span-2">Description<textarea className={inputCls} placeholder="Enter the pharmacy description" {...register("description")} /></label>
-      <button disabled={save.isPending} className="btn btn-primary md:w-32">Save</button>
-      {msg && <p role="status" className="text-sm md:col-span-2">{msg}</p>}
+    <form className="space-y-5" onSubmit={(e) => { e.preventDefault(); save.mutate(); }}>
+      <PageHeader title="Pharmacy settings" subtitle={`${form.name} · your website, emails and loading screens use these details.`} actions={<button className="btn btn-primary" disabled={save.isPending}>{save.isPending ? <Spinner /> : <Check size={16} aria-hidden />}Save changes</button>} />
+      <div className="grid gap-5 xl:grid-cols-[1fr_22rem]">
+        <div className="space-y-5">
+          <section className="card p-6"><h2 className="section-title">Contact and location</h2><div className="mt-4 grid gap-4 sm:grid-cols-2">
+            {text("contact_email", "Contact email", "email")}{text("contact_phone", "Contact phone", "tel")}{text("address", "Pharmacy address")}{text("city", "City")}{text("region", "Region")}
+            <label className="field-label sm:col-span-2">Description<textarea rows={4} className="mt-1.5 w-full" placeholder={placeholderFor("Pharmacy description")} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></label>
+          </div></section>
+          <section className="card p-6"><h2 className="section-title">Brand colours</h2><div className="mt-4 grid gap-4 lg:grid-cols-2">
+            <ColorPicker label="Primary color" value={form.primary_color} logo={logo} onChange={(v) => setForm({ ...form, primary_color: v })} />
+            <ColorPicker label="Secondary color" value={form.secondary_color} logo={logo} onChange={(v) => setForm({ ...form, secondary_color: v })} />
+          </div>{!logo && <p className="mt-3 text-xs text-muted">Tip: choose a new logo file to pick colours straight from it.</p>}</section>
+        </div>
+        <aside className="space-y-5">
+          <section className="card p-6 text-center"><h2 className="section-title">Logo</h2>
+            <div className="mx-auto mt-4 grid h-36 w-36 place-items-center overflow-hidden rounded-3xl border border-line bg-[#fff]">{picture ? <img src={picture} alt="Pharmacy logo" className="h-full w-full object-contain p-3" /> : <span className="text-5xl font-black" style={{ color: "#0b1324" }}>{form.name[0]}</span>}</div>
+            <input ref={file} type="file" accept="image/png,image/jpeg,image/webp" className="sr-only" aria-label="Choose a logo" onChange={(e) => setLogo(e.target.files?.[0] ?? null)} />
+            <button type="button" className="btn btn-outline mt-4" onClick={() => file.current?.click()}><ImageUp size={16} aria-hidden />{picture ? "Change logo" : "Upload logo"}</button>
+            <p className="mt-2 text-xs text-muted">PNG, JPG or WebP, up to 2 MB. Save to apply.</p></section>
+          <section className="card overflow-hidden"><div className="p-5 text-center" style={{ background: `linear-gradient(135deg, ${form.primary_color}, ${form.secondary_color})` }}><p className="text-lg font-extrabold text-white drop-shadow">{form.name}</p></div><div className="p-4 text-center"><span className="btn btn-sm text-white" style={{ background: form.primary_color }}>Button preview</span></div></section>
+        </aside>
+      </div>
     </form>
   );
 }

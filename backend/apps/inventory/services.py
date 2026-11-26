@@ -75,6 +75,12 @@ def _low_stock_push(batch):
     left = Batch.objects.filter(medicine=m, branch_id=batch.branch_id).filter(saleable_q()).aggregate(t=Sum("quantity_available"))["t"] or 0
     if left <= m.reorder_level:
         notify_topic(batch.tenant_id, batch.branch_id, "inventory", "inventory.low_stock", {"medicine": m.pk, "name": m.name, "available": left})
+        from apps.notifications import inapp
+        from apps.notifications.models import Notification
+        title = f"{'Out of stock' if left == 0 else 'Low stock'}: {m.name}"[:160]
+        if not Notification.objects.filter(tenant_id=batch.tenant_id, title=title, read_at__isnull=True).exists():  # one open alert per product
+            inapp.push_staff(batch.tenant_id, "inventory.view", batch.branch_id, kind="inventory", level="danger" if left == 0 else "warning",
+                             title=title, body=f"{left} left at {batch.branch.name} (reorder level {m.reorder_level}).", link="/inventory")
 
 
 @transaction.atomic

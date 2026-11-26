@@ -1,98 +1,56 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { ArrowLeft, Building2, ExternalLink, Pencil, Power, Users, Wallet } from "lucide-react";
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { ApiError, api } from "../../lib/api";
+import { DataTable, EmptyState, FormModal, Loading, StatCard, StatusBadge, errorMessage, usePrompt, useToast } from "../../components/ui";
+import { api } from "../../lib/api";
+import { day, readableOn } from "../../lib/format";
 import type { Pharmacy } from "./Pharmacies";
-import { Loading } from "../../components/ui";
 
 interface Overview {
   branches: { id: number; name: string; code: string; status: string }[];
   administrators: { id: number; email: string; full_name: string; is_active: boolean; must_change_password: boolean }[];
   user_count: number; subscription: { plan: string; status: string; current_period_end: string | null } | null;
 }
-
-function BrandingForm({ id, pharmacy }: { id: string; pharmacy: Pharmacy & { contact_email: string } }) {
-  const qc = useQueryClient();
-  const [v, setV] = useState({ name: pharmacy.name, primary_color: pharmacy.primary_color, secondary_color: (pharmacy as unknown as { secondary_color: string }).secondary_color ?? "#142D3D", contact_email: pharmacy.contact_email ?? "" });
-  const [logo, setLogo] = useState<File | null>(null);
-  const [msg, setMsg] = useState<string | null>(null);
-  const m = useMutation({
-    mutationFn: () => {
-      const fd = new FormData();
-      Object.entries(v).forEach(([k, val]) => fd.append(k, val));
-      if (logo) fd.append("logo", logo);
-      return api(`/platform/pharmacies/${id}/`, { method: "PATCH", body: fd });
-    },
-    onSuccess: () => { setMsg("Saved."); qc.invalidateQueries({ queryKey: ["pharmacy", id] }); },
-    onError: (e) => setMsg(e instanceof ApiError ? `${e.message} ${JSON.stringify(e.details ?? "")}` : "Save failed."),
-  });
-  const f = (k: keyof typeof v, label: string, ph: string) => (
-    <label className="text-sm">{label}<input placeholder={ph} className="mt-1 block px-3 py-2" value={v[k]} onChange={(e) => setV({ ...v, [k]: e.target.value })} /></label>
-  );
-  return (
-    <form onSubmit={(e) => { e.preventDefault(); setMsg(null); m.mutate(); }} className="flex flex-wrap items-end gap-3 card p-4">
-      <h2 className="w-full font-semibold">Branding</h2>
-      {f("name", "Name", "Enter the pharmacy name")}{f("primary_color", "Primary color", "Enter the primary color")}
-      {f("secondary_color", "Secondary color", "Enter the secondary color")}{f("contact_email", "Contact email", "Enter the contact email")}
-      <label className="text-sm">Logo<input type="file" accept="image/png,image/jpeg,image/webp" className="mt-1 block" onChange={(e) => setLogo(e.target.files?.[0] ?? null)} /></label>
-      <button disabled={m.isPending} className="btn btn-primary">Save</button>
-      {msg && <p role="status" className="w-full text-sm">{msg}</p>}
-    </form>
-  );
-}
+type Full = Pharmacy & { license_number: string; registration_number: string; contact_email: string; contact_phone: string; address: string; description: string };
 
 export default function PharmacyDetail() {
-  const { id } = useParams();
-  const qc = useQueryClient();
-  const [reason, setReason] = useState("");
-  const [confirming, setConfirming] = useState<"suspend" | "activate" | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const p = useQuery({ queryKey: ["pharmacy", id], queryFn: () => api<Pharmacy & { license_number: string; registration_number: string; contact_email: string }>(`/platform/pharmacies/${id}/`) });
+  const { id } = useParams(); const qc = useQueryClient(); const prompt = usePrompt(); const toast = useToast();
+  const [editing, setEditing] = useState(false);
+  const p = useQuery({ queryKey: ["pharmacy", id], queryFn: () => api<Full>(`/platform/pharmacies/${id}/`), retry: false });
   const o = useQuery({ queryKey: ["pharmacy-overview", id], queryFn: () => api<Overview>(`/platform/pharmacies/${id}/overview/`) });
-  const act = useMutation({
-    mutationFn: (a: "suspend" | "activate") => api(`/platform/pharmacies/${id}/${a}/`, { method: "POST", body: { reason } }),
-    onSuccess: () => { setConfirming(null); setReason(""); qc.invalidateQueries({ queryKey: ["pharmacy", id] }); qc.invalidateQueries({ queryKey: ["pharmacies"] }); },
-    onError: (e) => setError(e instanceof ApiError ? e.message : "Action failed."),
-  });
-  if (p.isLoading) return <Loading />;
-  if (p.isError || !p.data) return <p role="alert">Pharmacy not found.</p>;
+  const back = <Link to="/platform/pharmacies" className="btn btn-outline btn-sm"><ArrowLeft size={15} aria-hidden />All pharmacies</Link>;
+  if (p.isLoading) return <Loading rows={5} />;
+  if (!p.data) return <div className="space-y-4">{back}<EmptyState>Pharmacy not found.</EmptyState></div>;
   const ph = p.data;
+  const refresh = () => { qc.invalidateQueries({ queryKey: ["pharmacy", id] }); qc.invalidateQueries({ queryKey: ["pharmacies"] }); };
+  const act = async (what: "suspend" | "activate") => {
+    const v = await prompt({ title: `${what === "suspend" ? "Suspend" : "Activate"} ${ph.name}?`, message: what === "suspend" ? "Suspending blocks all sign-ins and revokes active sessions for this pharmacy." : "Activating restores access for this pharmacy.", confirmLabel: what === "suspend" ? "Suspend" : "Activate", danger: what === "suspend", fields: [{ name: "reason", label: "Reason", type: "textarea", required: what === "suspend" }] });
+    if (v) api(`/platform/pharmacies/${id}/${what}/`, { method: "POST", body: v }).then(() => { refresh(); toast("Pharmacy updated."); }).catch((e) => toast(errorMessage(e), "error"));
+  };
   return (
-    <div className="space-y-4">
-      <Link to="/platform/pharmacies" className="text-sm underline">← All pharmacies</Link>
-      <div className="flex flex-wrap items-center gap-3">
-        <span className="h-6 w-6 rounded" style={{ background: ph.primary_color }} aria-hidden />
-        <h1 className="page-title">{ph.name}</h1>
-        <span className="rounded bg-slate-200 px-2 py-0.5 text-xs">{ph.status}</span>
-        {ph.status === "active"
-          ? <button onClick={() => setConfirming("suspend")} className="btn btn-outline btn-sm ml-auto">Suspend</button>
-          : <button onClick={() => setConfirming("activate")} className="btn btn-outline btn-sm ml-auto">Activate</button>}
-      </div>
-      {confirming && (
-        <div role="dialog" aria-label={`Confirm ${confirming}`} className="space-y-2 rounded-xl border bg-white p-4">
-          <p>{confirming === "suspend" ? "Suspending blocks all logins and revokes active sessions for this pharmacy." : "Activating restores access for this pharmacy."}</p>
-          <input aria-label="Reason" placeholder="Enter the reason" value={reason} onChange={(e) => setReason(e.target.value)} className="w-full px-3 py-2" />
-          {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
-          <div className="flex gap-2">
-            <button disabled={act.isPending} onClick={() => act.mutate(confirming)} className="rounded bg-slate-900 px-3 py-1 text-white">Confirm {confirming}</button>
-            <button onClick={() => setConfirming(null)} className="btn btn-outline btn-sm">Cancel</button>
-          </div>
+    <div className="space-y-5">
+      {back}
+      <section className="card animate-rise overflow-hidden">
+        <div className="h-24" style={{ background: `linear-gradient(135deg, ${ph.primary_color}, ${ph.secondary_color})` }} />
+        <div className="flex flex-wrap items-end gap-4 px-5 pb-5">
+          {ph.logo ? <img src={ph.logo} alt="" className="-mt-10 h-24 w-24 rounded-2xl border-4 border-[var(--color-surface)] bg-[#fff] object-contain p-2" /> : <span className="-mt-10 grid h-24 w-24 place-items-center rounded-2xl border-4 border-[var(--color-surface)] text-4xl font-black" style={{ background: ph.primary_color, color: readableOn(ph.primary_color) }}>{ph.name[0]}</span>}
+          <div className="min-w-0 flex-1 pt-3"><h1 className="page-title flex flex-wrap items-center gap-2">{ph.name}<StatusBadge status={ph.status} /></h1><a href={`/${ph.slug}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-sm text-primary hover:underline">/{ph.slug}<ExternalLink size={13} aria-hidden /></a></div>
+          <div className="flex flex-wrap gap-2"><button className="btn btn-outline" onClick={() => setEditing(true)}><Pencil size={15} aria-hidden />Edit</button>
+            <button className={`btn ${ph.status === "active" ? "btn-outline btn-link-danger" : "btn-primary"}`} onClick={() => act(ph.status === "active" ? "suspend" : "activate")}><Power size={15} aria-hidden />{ph.status === "active" ? "Suspend" : "Activate"}</button></div>
         </div>
-      )}
-      <BrandingForm id={id!} pharmacy={ph} />
-      <section className="grid gap-4 md:grid-cols-2">
-        <div className="card p-4"><h2 className="section-title mb-3">Details</h2>
-          <dl className="grid grid-cols-2 gap-1 text-sm">
-            <dt>Website</dt><dd>/{ph.slug}</dd><dt>License</dt><dd>{ph.license_number || "—"}</dd>
-            <dt>Registration</dt><dd>{ph.registration_number || "—"}</dd><dt>Contact</dt><dd>{ph.contact_email || "—"}</dd>
-            <dt>Users</dt><dd>{o.data?.user_count ?? "…"}</dd>
-            <dt>Subscription</dt><dd>{o.data?.subscription ? `${o.data.subscription.plan} (${o.data.subscription.status})` : "None"}</dd>
-          </dl></div>
-        <div className="card p-4"><h2 className="section-title mb-3">Administrators</h2>
-          <ul className="text-sm">{o.data?.administrators.map((a) => <li key={a.id}>{a.full_name} · {a.email} {a.must_change_password && <em>(pending first login)</em>}</li>)}</ul>
-          <h2 className="mb-2 mt-4 font-semibold">Branches</h2>
-          <ul className="text-sm">{o.data?.branches.map((b) => <li key={b.id}>{b.name} ({b.code}) · {b.status}</li>)}</ul></div>
       </section>
+      <div className="grid gap-4 sm:grid-cols-3"><StatCard label="Users" value={o.data?.user_count ?? "…"} icon={Users} /><StatCard label="Branches" value={o.data?.branches.length ?? "…"} icon={Building2} tone="navy" /><StatCard label="Subscription" value={o.data?.subscription?.plan ?? "None"} icon={Wallet} tone="info" hint={o.data?.subscription ? `${o.data.subscription.status}${o.data.subscription.current_period_end ? ` until ${day(o.data.subscription.current_period_end)}` : ""}` : undefined} /></div>
+      <div className="grid items-start gap-5 xl:grid-cols-[1fr_2fr]">
+        <section className="card p-5 text-sm"><h2 className="section-title">Details</h2><dl className="mt-3 space-y-2.5">{([["Licence", ph.license_number], ["Registration", ph.registration_number], ["Contact email", ph.contact_email], ["Contact phone", ph.contact_phone], ["Address", [ph.address, ph.city, ph.country].filter(Boolean).join(", ")]] as const).map(([k, v]) => <div key={k} className="flex justify-between gap-3 border-b border-line pb-2"><dt className="text-muted">{k}</dt><dd className="break-all text-right font-semibold">{v || "—"}</dd></div>)}</dl></section>
+        <div className="space-y-5">
+          <section className="space-y-2"><h2 className="section-title">Administrators</h2><DataTable rows={o.data?.administrators} loading={o.isLoading} rowKey={(a) => a.id} pageSize={5} columns={[{ key: "name", header: "Name", render: (a) => <b>{a.full_name}</b> }, { key: "email", header: "Email", render: (a) => a.email }, { key: "status", header: "Status", render: (a) => <StatusBadge status={!a.is_active ? "deactivated" : a.must_change_password ? "invited" : "active"} /> }]} /></section>
+          <section className="space-y-2"><h2 className="section-title">Branches</h2><DataTable rows={o.data?.branches} loading={o.isLoading} rowKey={(b) => b.id} pageSize={5} columns={[{ key: "name", header: "Branch", render: (b) => <b>{b.name}</b> }, { key: "code", header: "Code", render: (b) => b.code }, { key: "status", header: "Status", render: (b) => <StatusBadge status={b.status} /> }]} /></section>
+        </div>
+      </div>
+      {editing && <FormModal title={`Edit ${ph.name}`} size="lg" onClose={() => setEditing(false)}
+        fields={[{ name: "name", label: "Pharmacy name", defaultValue: ph.name }, { name: "contact_email", label: "Contact email", type: "email", required: false, defaultValue: ph.contact_email }, { name: "logo", label: "Logo", type: "file", accept: "image/png,image/jpeg,image/webp", wide: true }, { name: "primary_color", label: "Primary color", type: "color", defaultValue: ph.primary_color }, { name: "secondary_color", label: "Secondary color", type: "color", defaultValue: ph.secondary_color }]}
+        onSubmit={async (v, files) => { const fd = new FormData(); (["name", "contact_email", "primary_color", "secondary_color"] as const).forEach((k) => fd.append(k, v[k])); if (files.logo) fd.append("logo", files.logo); await api(`/platform/pharmacies/${id}/`, { method: "PATCH", body: fd }); refresh(); toast("Pharmacy updated."); }} />}
     </div>
   );
 }

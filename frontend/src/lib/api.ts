@@ -2,6 +2,7 @@
 export interface User {
   id: number; email: string; full_name: string; role: string | null; permissions: string[];
   tenant_slug: string | null; branch: number | null; is_platform_admin: boolean; must_change_password: boolean; email_verified: boolean;
+  phone?: string; avatar?: string | null; role_name?: string | null; branch_name?: string | null; pharmacy_name?: string | null; has_password?: boolean; date_joined?: string;
 }
 export class ApiError extends Error {
   constructor(public status: number, public code: string, message: string, public details?: unknown) { super(message); }
@@ -36,6 +37,11 @@ async function refresh(tenant?: string | null): Promise<boolean> {
   if (!res.ok) { setTokens(null); return false; }
   setTokens((await res.json()).tokens); return true;
 }
+/** After a page reload the access token (memory only) is gone: renew it from this tab's refresh token. One shared request, because
+ *  refresh tokens are single use. */
+let restoring: Promise<boolean> | null = null;
+export const restoreSession = () => (access ? Promise.resolve(true) : (restoring ??= refresh().catch(() => false).finally(() => { restoring = null; })));
+
 export interface LoginResult { tokens: { access: string; refresh: string }; user: User }
 export async function login(email: string, password: string, tenant?: string | null) {
   const r = await api<LoginResult>("/auth/login/", { method: "POST", body: { email, password }, tenant, retry: false });

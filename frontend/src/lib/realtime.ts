@@ -3,8 +3,9 @@ import { useEffect } from "react";
 import { getAccessToken } from "./api";
 
 const REFRESH: Record<string, string[]> = {
-  "order.": ["staff-orders", "my-orders", "my-order", "orders", "payments", "sales"],
-  "payment.": ["my-order", "staff-orders", "attempts"],
+  "notification.": ["notifications"],
+  "order.": ["staff-orders", "my-orders", "my-order", "orders", "payments", "sales", "analytics"],
+  "payment.": ["my-order", "staff-orders", "attempts", "analytics", "my-payments"],
   "qr_request.": ["qr-requests"],
   "prescription.": ["rxs", "rx"],
   "inventory.": ["alerts", "inv-overview", "batches", "medicines"],

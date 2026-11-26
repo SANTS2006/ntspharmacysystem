@@ -110,7 +110,7 @@ Customer (send `X-Tenant-Slug`): `POST /shop/register/` (terms required), `POST 
 Staff (`order.manage`, branch-scoped): `GET /orders/`, `GET /orders/{id}/`, `POST /orders/{id}/transition/`, `GET /qr-requests/`, `POST /qr-requests/{id}/status/`; `GET /branches/{id}/qr/` (PNG, `branch.view`).
 
 ## Payments, receipts and real-time (Phase 9)
-- Webhook (public, signed): `POST /webhooks/monime/{slug}/` (header `Monime-Signature`)
+- Webhook (public, signed): `POST /webhooks/monime/` (header `Monime-Signature`; the older `/webhooks/monime/{slug}/` still works)
 - Customer: `POST /shop/orders/{id}/pay/`, `GET /shop/orders/{id}/payments/`, `GET /shop/orders/{id}/receipt/` and `/receipt/pdf/`, `GET /shop/payments/`
 - Staff: `GET|PUT /payments/config/` (`settings.manage`; secrets write-only), `GET /payments/attempts/` (`order.manage`), `POST /payments/reconcile/` (`accounting.manage`), `GET /payments/reconciliation/` (`accounting.view`),
   `GET /orders/{id}/receipt/` and `/receipt/pdf/`, `POST /orders/{id}/refund/` (`sales.refund`)
@@ -142,3 +142,13 @@ Permissions: `accounting.view` / `accounting.manage` (admin, accountant); branch
 ## Backups and health (Phase 13)
 - Platform administrators only: `GET|POST /platform/backups/`, `GET /platform/backups/health/`, `POST /platform/backups/{id}/verify/`, `GET /platform/backups/{id}/download/` (encrypted object), `GET|POST /platform/restores/`, `POST /platform/restores/{id}/approve|reject|execute/`
 - Load balancer probes (no auth, no data): `GET /health/live/`, `GET /health/ready/`
+
+## Account, notifications, customers, analytics and mobile money
+- `PATCH /auth/me/profile/`, `POST|DELETE /auth/me/avatar/`, `POST /auth/me/email/` then `/auth/me/email/confirm/`
+- `GET /notifications/`, `GET|DELETE /notifications/{id}/`, `POST /notifications/{id}/read/`, `POST /notifications/read-all/` (own only)
+- `GET /customers/`, `GET|PATCH /customers/{id}/` (`customer.view` / `customer.manage`)
+- `GET /analytics/?days=` (sections depend on the caller's permissions), `GET /analytics/platform/` (platform admins)
+- `GET /shop/summary/`, `POST /shop/orders/{id}/payments/refresh/`
+- `GET /payments/status/`, `GET|POST /payments/mobile-money/`, `GET /payments/mobile-money/{id}/`, `POST /payments/mobile-money/{id}/cancel/` (`pos.sell`)
+- `GET /subscription/`, `POST /subscription/invoices/{id}/pay/`, `POST /subscription/invoices/{id}/refresh/` (`settings.manage`)
+- Removed: `GET|PUT /payments/config/`

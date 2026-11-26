@@ -132,6 +132,9 @@ def _set_new_password(user, new_password, request, action):
     user.credential_version += 1  # revokes every previously issued token
     user.save()
     audit.record(action, actor=user, tenant=user.tenant, request=request)
+    from apps.notifications import inapp
+    inapp.push([user], kind="security", level="warning", title="Your password was changed",
+               body="If this was not you, reset your password now and tell your administrator.", link="/settings")
     return issue_tokens(user)
 
 

@@ -14,6 +14,7 @@ from apps.core.fields import TenantPKField
 from apps.core.realtime import notify_topic
 from apps.core.tenant_context import tenant_context
 from apps.core.views import TenantContextMixin
+from apps.notifications import inapp
 from apps.inventory.selectors import branch_ids_for
 from apps.shop.models import Order
 from apps.shop.views import IsVerifiedCustomer
@@ -171,6 +172,8 @@ class MyInquiriesView(TenantContextMixin, APIView):
         branch = Branch.objects.filter(pk=request.data["branch"]).first() if request.data.get("branch") else None
         i = CustomerInquiry.objects.create(customer=request.user, kind=kind, message=msg[:1000], branch=branch)
         notify_topic(i.tenant_id, branch.pk if branch else None, "orders", "inquiry.created", {"id": i.pk, "kind": i.kind})
+        inapp.push_staff(i.tenant_id, "engagement.manage", branch.pk if branch else None, kind="inquiry", title=f"New customer {i.kind}",
+                         body=f"{request.user.full_name}: {msg[:200]}", link="/engagement")
         return Response({"id": i.pk}, status=201)
 
 
@@ -215,6 +218,7 @@ class StaffInquiryRespondView(Base, APIView):
         i.response, i.status, i.handled_by = resp[:1000], "answered", request.user
         i.save()
         services._mail(i.customer.email, "Reply to your enquiry", resp, "inquiry_reply")
+        inapp.push([i.customer], kind="inquiry", level="success", title="The pharmacy replied to your enquiry", body=resp[:300], link="/care")
         audit.record("inquiry.answered", actor=request.user, target=i)
         return Response({"id": i.pk, "status": i.status})
 
@@ -279,6 +283,7 @@ class PublicInstitutionalView(APIView):
             r = InstitutionalRequest.objects.create(**d)
             audit.record("institutional_request.created", actor=None, tenant=t, target=r)
             notify_topic(t.pk, None, "orders", "institutional_request.created", {"id": r.pk, "kind": "institutional"})
+            inapp.push_staff(t.pk, "engagement.manage", None, kind="inquiry", title=f"Bulk request from {r.organisation}", body=r.service_required, link="/engagement")
             services._mail(r.email, f"We received your request: {r.service_required}", f"Thank you {r.contact_person}. {t.name} received your request and will respond to {r.email}.", "institutional_ack")
         return Response({"received": True, "reference": r.pk}, status=201)
 

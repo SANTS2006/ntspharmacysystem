@@ -7,6 +7,7 @@ from apps.audit import services as audit
 from apps.core.exceptions import BusinessRuleViolation
 from apps.core.realtime import notify_topic
 from apps.shop import services as shop
+from apps.notifications import inapp
 from apps.shop.models import Order
 
 from .models import Delivery
@@ -17,6 +18,9 @@ S = Order.Status
 def _push(d: Delivery):
     o = d.order
     notify_topic(d.tenant_id, o.branch_id, "orders", "delivery.updated", {"id": d.pk, "order": o.pk, "reference": o.reference_number, "status": d.status}, users=[d.driver_id, o.customer_id])
+    status = d.status.replace("_", " ")
+    inapp.push([d.driver], kind="delivery", title=f"Delivery for {o.reference_number}: {status}", body="Open your deliveries for the details.", link="/deliveries")
+    inapp.push([o.customer], kind="delivery", title=f"Delivery {status}", body=f"Update for order {o.reference_number}.", link=f"/orders/{o.pk}")
 
 
 @transaction.atomic

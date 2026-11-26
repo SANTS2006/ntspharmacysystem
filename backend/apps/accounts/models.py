@@ -53,6 +53,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     email = models.EmailField()
     full_name = models.CharField(max_length=200)
     phone = models.CharField(max_length=30, blank=True)
+    avatar = models.ImageField(upload_to="avatars/", blank=True)
     is_platform_admin = models.BooleanField(default=False)
     is_staff = models.BooleanField(default=False)  # Django admin access only
     is_active = models.BooleanField(default=True)
@@ -122,3 +123,13 @@ class Invitation(TimeStampedModel):
     token_hash = models.CharField(max_length=64, unique=True)
     expires_at = models.DateTimeField()
     used_at = models.DateTimeField(null=True, blank=True)
+
+
+class EmailChange(models.Model):
+    """A pending change of sign-in address. The code is stored only as a salted hash; one pending change per user."""
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="email_change")
+    new_email = models.EmailField()
+    code_hash = models.CharField(max_length=64)
+    expires_at = models.DateTimeField()
+    attempts = models.PositiveSmallIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now=True)

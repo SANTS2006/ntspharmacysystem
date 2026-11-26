@@ -54,6 +54,9 @@ class Invoice(TimeStampedModel):
     refunded_amount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0"))
     refunded_at = models.DateTimeField(null=True, blank=True)
     notes = models.CharField(max_length=255, blank=True)
+    provider_session_id = models.CharField(max_length=100, blank=True, db_index=True)  # Monime checkout opened by the pharmacy
+    checkout_url = models.URLField(max_length=500, blank=True)
+    checkout_attempt = models.PositiveSmallIntegerField(default=0)
 
     class Meta:
         ordering = ["-created_at"]

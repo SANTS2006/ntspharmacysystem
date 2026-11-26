@@ -13,6 +13,7 @@ from apps.core.tenant_context import get_current_tenant
 from apps.inventory import services as inv
 from apps.inventory.models import Batch
 from apps.medicines.models import Medicine
+from apps.notifications import inapp
 from apps.prescriptions.models import Dispensing, DispensingItem
 from apps.procurement.models import next_number
 
@@ -105,6 +106,9 @@ def request_cash_movement(shift_id, *, user, kind, amount, reason) -> CashMoveme
         from apps.accounting.posting import post_cash_movement
         post_cash_movement(m)
     audit.record(f"shift.cash_{kind}_requested", actor=user, target=m, branch_id=shift.branch_id, amount=str(amount), reason=reason)
+    if m.status == CashMovement.Status.PENDING:
+        inapp.push_staff(shift.tenant_id, "sales.refund", shift.branch_id, kind="cash", level="warning", title="Cash withdrawal needs approval",
+                         body=f"{user.full_name} requested {amount}: {reason}", link="/pos", exclude=user)
     return m
 
 
@@ -122,6 +126,8 @@ def decide_cash_movement(pk, *, user, approve: bool) -> CashMovement:
     if approve:
         from apps.accounting.posting import post_cash_movement
         post_cash_movement(m)
+    inapp.push([m.requested_by], kind="cash", level="success" if approve else "danger", title=f"Cash withdrawal {'approved' if approve else 'rejected'}",
+               body=f"{m.amount}: {m.reason}", link="/pos")
     audit.record("shift.cash_withdrawal_approved" if approve else "shift.cash_withdrawal_rejected", actor=user, target=m, branch_id=m.shift.branch_id, amount=str(m.amount))
     return m
 
@@ -156,9 +162,12 @@ def _apply_tenders(payments: list[dict], due: Decimal):
 
 
 def _store_payments(sale, shift, rows, user):
+    from apps.payments import services as gateway
     created = []
     for r in rows:
         ref = (r.get("reference") or "").strip()
+        if r["method"] == Payment.Method.MOBILE_MONEY and gateway.provider_ready():
+            ref = gateway.claim_collection(ref, amount=q2(r["amount"]), branch_id=shift.branch_id, used_for=sale.reference_number)
         if ref and Payment.objects.filter(method=r["method"], reference=ref).exists():
             raise ValidationError({"payments": f"Reference '{ref}' was already recorded (duplicate payment)."})
         created.append(Payment.objects.create(sale=sale, shift=shift, method=r["method"], amount=q2(r["amount"]), reference=ref[:100], received_by=user))

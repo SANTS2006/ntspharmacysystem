@@ -1,7 +1,7 @@
 import { DatabaseBackup, LayoutDashboard, Receipt, ScrollText, Store } from "lucide-react";
 import { Navigate, Outlet } from "react-router-dom";
+import { PLATFORM_BRAND, PageLoader } from "../../components/brand/Brand";
 import { AppShell, type NavGroup } from "../../components/layout/AppShell";
-import { Loading } from "../../components/ui";
 import { useAuth } from "../../lib/auth";
 
 const groups: NavGroup[] = [
@@ -16,13 +16,12 @@ const groups: NavGroup[] = [
 
 /** UI guard only. Every API call is independently authorised by the backend. */
 export default function AdminLayout() {
-  const { user, loading, signOut } = useAuth();
-  if (loading) return <div className="p-8"><Loading /></div>;
+  const { user, loading } = useAuth();
+  if (loading) return <PageLoader label="Opening platform administration…" />;
   if (!user || !user.is_platform_admin) return <Navigate to="/platform/login" replace />;
   if (user.must_change_password) return <Navigate to="/change-password" replace />;
   return (
-    <AppShell groups={groups} navLabel="Platform" brandName="NTS Pharmacy System" brandCaption="Platform administration"
-      user={{ name: user.full_name, role: "Platform administrator" }} onSignOut={signOut}>
+    <AppShell groups={groups} navLabel="Platform" brand={PLATFORM_BRAND} brandCaption="Platform administration" base="/platform" roleLabel="Platform admin">
       <Outlet />
     </AppShell>
   );

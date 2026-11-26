@@ -13,10 +13,18 @@ Inputs, selects and textareas are styled globally. Never use `window.prompt` or 
 ## Branding
 The staff and platform areas use the system palette. Each pharmacy's public website uses that pharmacy's own colour, logo and name.
 
+## Themes, motion and layout
+Light and dark themes are token-based (`.dark` on `<html>`, applied before paint by `public/theme.js`). Page content takes 90% of its area
+(`page-wrap`, `site-wrap`). Websites use `components/site/motion.tsx` (reveal on scroll, tilt cards, slide-in menu, page SEO) and a lazy-loaded
+three.js scene (`components/three/`). All motion is disabled for reduced-motion users.
+
+## Shared building blocks
+`FormModal`/`FormFields` (add and edit dialogs with placeholders, password toggle, colour picker), `useConfirm` (delete and other confirmations),
+`DataTable`/`ServerTable` (search, sort, pagination), `Loading`/`TableLoader`/`PageLoader` (branded loaders), `components/charts`.
+Staff modules and their required permissions are listed once in `pages/tenant/access.ts`.
+
 ## Gaps (documented, not invented)
-- No customer directory or patient profile screen. The API has `/patients/` (used inside Prescriptions), but there is no purchase-history endpoint per patient.
+- "Delete" for medicines, branches, suppliers, services, staff and customers deactivates or archives, so sales and clinical history are kept. Only
+  categories without medicines, notifications, saved addresses and profile pictures are permanently deleted.
 - Header search jumps between pages only: there is no cross-record search API.
-- The notification bell shows stock alerts from `/inventory/alerts/`: there is no general notifications API.
-- No "my profile" edit endpoint; the user menu offers Change password and Sign out.
-- The access token is held in memory, so reloading the browser tab asks the user to sign in again (behaviour unchanged by the redesign).
-- Some module pages (HR, payroll, accounting, procurement, engagement) have the new styling but keep their original page structure and inline forms; their tables are not individually paginated or searchable unless they already were.
+- The access token stays in memory; after a reload the session is renewed from the tab's refresh token.

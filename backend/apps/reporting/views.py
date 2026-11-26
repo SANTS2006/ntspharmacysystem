@@ -6,12 +6,12 @@ from rest_framework.exceptions import NotFound, PermissionDenied
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.accounts.permissions import IsAuthenticatedAndSettled
+from apps.accounts.permissions import IsAuthenticatedAndSettled, IsPlatformAdmin
 from apps.audit import services as audit
 from apps.core.views import TenantContextMixin
 from apps.tenants.models import Branch
 
-from . import dashboard, exports, reports
+from . import analytics, dashboard, exports, reports
 
 
 class ReportBase(TenantContextMixin, APIView):
@@ -91,3 +91,26 @@ class DashboardView(ReportBase):
             raise PermissionDenied("You are not allowed to view the dashboard.")
         p = self.params(request)
         return Response(dashboard.build(u, p))
+
+
+def _days(request) -> int:
+    raw = str(request.query_params.get("days", "30"))
+    return max(7, min(int(raw), 365)) if raw.isdigit() else 30
+
+
+class AnalyticsView(TenantContextMixin, APIView):
+    """Any staff member may call this; the response contains only the sections their role permits."""
+    permission_classes = [IsAuthenticatedAndSettled]
+
+    def get(self, request):
+        u = request.user
+        if u.is_platform_admin or not u.role_id or u.role.code == "customer":
+            raise PermissionDenied("Staff only.")
+        return Response(analytics.build(u, _days(request)))
+
+
+class PlatformAnalyticsView(APIView):
+    permission_classes = [IsPlatformAdmin]
+
+    def get(self, request):
+        return Response(analytics.platform(_days(request)))

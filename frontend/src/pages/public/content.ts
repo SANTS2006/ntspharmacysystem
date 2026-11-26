@@ -14,7 +14,7 @@ export const faqs = [
   ["Is our data separated from other pharmacies?", "Yes. Every record belongs to one pharmacy and is only accessible to users of that pharmacy, enforced on the server."],
   ["How do we get started?", "Pharmacies are registered by the platform team. The pharmacy administrator then receives a secure onboarding email and must set a new password at first sign-in."],
   ["Can prescription medicines be sold online?", "Only with a valid prescription and pharmacist approval, subject to your local regulations and your own configuration."],
-  ["Which payment methods are supported?", "Payment features are being rolled out in phases. Mobile money (Monime) and online payments are planned and not yet available."],
+  ["Which payment methods are supported?", "Cash, card and bank transfer are recorded at the point of sale. Mobile money is supported through Monime, both online and at the till, once the platform has enabled it."],
 ];
 
 export const legalDocs: Record<string, { title: string; sections: [string, string][] }> = {
