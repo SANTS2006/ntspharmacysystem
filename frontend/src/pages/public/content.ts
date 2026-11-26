@@ -20,7 +20,7 @@ export const faqs = [
 export const legalDocs: Record<string, { title: string; sections: [string, string][] }> = {
   privacy: { title: "Privacy Policy", sections: [
     ["What we collect", "Account details of pharmacy staff and administrators, usage logs and, on behalf of each pharmacy, the customer and prescription data the pharmacy enters."],
-    ["Roles", "For pharmacy customer and patient data, the pharmacy is the data controller and PharmaCloud acts as a processor."],
+    ["Roles", "For pharmacy customer and patient data, the pharmacy is the data controller and NTS Pharmacy System acts as a processor."],
     ["Your rights", "You may request access, correction or deletion of your personal data by contacting the pharmacy or the platform."],
     ["Retention", "Data is retained for as long as the account is active and as required by applicable pharmacy and tax regulations."]] },
   terms: { title: "Terms of Service", sections: [

@@ -5,11 +5,12 @@ import { useForm } from "react-hook-form";
 import { Link } from "react-router-dom";
 import { z } from "zod";
 import { ApiError, api } from "../../lib/api";
+import { EmptyState, Loading, PageHeader } from "../../components/ui";
 
 export interface Pharmacy { id: number; name: string; slug: string; status: string; city: string; country: string; created_at: string; primary_color: string }
 interface Page<T> { count: number; next: string | null; previous: string | null; results: T[] }
 
-const hex = z.string().regex(/^#[0-9A-Fa-f]{6}$/, "Enter a color like #015dc9.");
+const hex = z.string().regex(/^#[0-9A-Fa-f]{6}$/, "Enter a color like #059669.");
 const schema = z.object({
   name: z.string().min(2, "Enter the pharmacy name."),
   slug: z.string().regex(/^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/, "Use 3-63 lowercase letters, numbers or hyphens."),
@@ -31,7 +32,7 @@ function Field({ label, error, required, children }: { label: string; error?: st
     </label>
   );
 }
-const input = "mt-1 w-full rounded border p-2 font-normal";
+const input = "mt-1 w-full px-3 py-2 font-normal";
 
 function RegisterForm({ onDone }: { onDone: () => void }) {
   const qc = useQueryClient();
@@ -39,7 +40,7 @@ function RegisterForm({ onDone }: { onDone: () => void }) {
   const [serverError, setServerError] = useState<string | null>(null);
   const { register, handleSubmit, formState: { errors } } = useForm<Form>({
     resolver: zodResolver(schema),
-    defaultValues: { country: "Sierra Leone", primary_color: "#015dc9", secondary_color: "#25bcfb", use_invitation: true, contact_email: "" },
+    defaultValues: { country: "Sierra Leone", primary_color: "#059669", secondary_color: "#142D3D", use_invitation: true, contact_email: "" },
   });
   const m = useMutation({
     mutationFn: (v: Form) => {
@@ -74,8 +75,8 @@ function RegisterForm({ onDone }: { onDone: () => void }) {
       <Field label="Administrator phone"><input className={input} placeholder="Enter the administrator's phone" {...register("admin_phone")} /></Field>
       <label className="flex items-center gap-2 text-sm md:col-span-2"><input type="checkbox" {...register("use_invitation")} /> Send a one-time invitation link instead of a temporary password (recommended)</label>
       <div className="flex gap-2 md:col-span-2">
-        <button disabled={m.isPending} className="rounded bg-teal-700 px-4 py-2 text-white disabled:opacity-60">{m.isPending ? "Registering…" : "Register pharmacy"}</button>
-        <button type="button" onClick={onDone} className="rounded border px-4 py-2">Cancel</button>
+        <button disabled={m.isPending} className="btn btn-primary">{m.isPending ? "Registering…" : "Register pharmacy"}</button>
+        <button type="button" onClick={onDone} className="btn btn-outline">Cancel</button>
       </div>
     </form>
   );
@@ -90,26 +91,26 @@ export default function Pharmacies() {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h1 className="text-2xl font-semibold">Pharmacies</h1>
-        <button onClick={() => setAdding(true)} className="rounded bg-teal-700 px-4 py-2 text-white">Register pharmacy</button>
+        <PageHeader title="Pharmacies" subtitle="Register and manage pharmacy tenants." />
+        <button onClick={() => setAdding(true)} className="btn btn-primary">Register pharmacy</button>
       </div>
       {adding && <RegisterForm onDone={() => setAdding(false)} />}
       <div className="flex gap-2">
-        <input aria-label="Search pharmacies" placeholder="Enter a pharmacy name or slug" value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} className="w-64 rounded border p-2" />
-        <select aria-label="Filter by status" value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); }} className="rounded border p-2">
+        <input aria-label="Search pharmacies" placeholder="Enter a pharmacy name or slug" value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} className="w-64 px-3 py-2" />
+        <select aria-label="Filter by status" value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); }} className="px-3 py-2">
           <option value="">All statuses</option><option value="active">Active</option><option value="suspended">Suspended</option>
         </select>
       </div>
-      {isLoading && <p>Loading…</p>}
+      {isLoading && <Loading />}
       {isError && <p role="alert">Pharmacies could not be loaded.</p>}
-      {data && data.results.length === 0 && <p className="text-slate-500">No pharmacies found.</p>}
+      {data && data.results.length === 0 && <EmptyState>No pharmacies found.</EmptyState>}
       {data && data.results.length > 0 && (
-        <div className="overflow-x-auto rounded-xl bg-white shadow-sm">
-          <table className="w-full text-left text-sm">
-            <thead className="bg-slate-100"><tr><th className="p-3">Name</th><th>Address</th><th>Location</th><th>Status</th></tr></thead>
+        <div className="table-wrap">
+          <table className="table">
+            <thead><tr><th>Name</th><th>Address</th><th>Location</th><th>Status</th></tr></thead>
             <tbody>{data.results.map((p) => (
-              <tr key={p.id} className="border-t">
-                <td className="p-3"><Link className="font-medium text-teal-800 underline" to={`/platform/pharmacies/${p.id}`}>{p.name}</Link></td>
+              <tr key={p.id}>
+                <td><Link className="font-medium text-teal-800 underline" to={`/platform/pharmacies/${p.id}`}>{p.name}</Link></td>
                 <td>/{p.slug}</td><td>{[p.city, p.country].filter(Boolean).join(", ")}</td>
                 <td><span className={`rounded px-2 py-0.5 text-xs ${p.status === "active" ? "bg-green-100 text-green-800" : "bg-amber-100 text-amber-800"}`}>{p.status}</span></td>
               </tr>))}</tbody>
@@ -117,9 +118,9 @@ export default function Pharmacies() {
         </div>
       )}
       <div className="flex items-center gap-2">
-        <button disabled={!data?.previous} onClick={() => setPage((p) => p - 1)} className="rounded border px-3 py-1 disabled:opacity-40">Previous</button>
+        <button disabled={!data?.previous} onClick={() => setPage((p) => p - 1)} className="btn btn-outline btn-sm">Previous</button>
         <span className="text-sm">Page {page}</span>
-        <button disabled={!data?.next} onClick={() => setPage((p) => p + 1)} className="rounded border px-3 py-1 disabled:opacity-40">Next</button>
+        <button disabled={!data?.next} onClick={() => setPage((p) => p + 1)} className="btn btn-outline btn-sm">Next</button>
       </div>
     </div>
   );

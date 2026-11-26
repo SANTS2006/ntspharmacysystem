@@ -15,7 +15,7 @@ RENDER_EXTERNAL_HOSTNAME = env("RENDER_EXTERNAL_HOSTNAME", default="")  # set au
 if RENDER_EXTERNAL_HOSTNAME and RENDER_EXTERNAL_HOSTNAME not in ALLOWED_HOSTS:
     ALLOWED_HOSTS.append(RENDER_EXTERNAL_HOSTNAME)
 
-PLATFORM_NAME = env("PLATFORM_NAME", default="PharmaCloud")
+PLATFORM_NAME = env("PLATFORM_NAME", default="NTS Pharmacy System")
 PLATFORM_BASE_DOMAIN = env("PLATFORM_BASE_DOMAIN", default="localhost")
 FRONTEND_URL = env("FRONTEND_URL", default=env("RENDER_EXTERNAL_URL", default="http://localhost:5173"))  # same origin as the API when served by Django
 

@@ -1,6 +1,7 @@
 import { lazy, Suspense } from "react";
 import { Route, Routes, useParams } from "react-router-dom";
 import { Home } from "./pages/public/PublicPages";
+import { Loading } from "./components/ui";
 
 const PP = (n: string) => lazy(() => import("./pages/public/PublicPages").then((m) => ({ default: (m as never as Record<string, React.ComponentType>)[n] })));
 const Features = PP("Features"), Solutions = PP("Solutions"), Pricing = PP("Pricing"), About = PP("About"), Faq = PP("Faq"), Contact = PP("Contact"), Legal = PP("Legal");
@@ -15,7 +16,8 @@ const Billing = lazy(() => import("./pages/admin/Billing"));
 const AuditLog = lazy(() => import("./pages/admin/AuditLog"));
 const TenantLayout = lazy(() => import("./pages/tenant/TenantLayout"));
 const T = (n: string) => lazy(() => import("./pages/tenant/TenantPages").then((m) => ({ default: (m as never as Record<string, React.ComponentType>)[n] })));
-const TenantDashboard = T("TenantDashboard"), Branches = T("Branches"), StaffPage = T("StaffPage"), RolesPage = T("RolesPage"), SettingsPage = T("SettingsPage");
+const TenantDashboard = lazy(() => import("./pages/tenant/DashboardHome"));
+const Branches = T("Branches"), StaffPage = T("StaffPage"), RolesPage = T("RolesPage"), SettingsPage = T("SettingsPage");
 const I = (n: string) => lazy(() => import("./pages/tenant/InventoryPages").then((m) => ({ default: (m as never as Record<string, React.ComponentType>)[n] })));
 const MedicinesPage = I("MedicinesPage"), InventoryPage = I("InventoryPage");
 const ProcurementPage = lazy(() => import("./pages/tenant/ProcurementPage"));
@@ -45,7 +47,7 @@ const Support = lazy(() => import("./pages/public/PublicPages").then((m) => ({ d
 
 export default function App() {
   return (
-    <Suspense fallback={<p className="p-8">Loading…</p>}>
+    <Suspense fallback={<div className="p-8"><Loading /></div>}>
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/features" element={<Features />} />

@@ -381,7 +381,7 @@ def test_branch_qr_code_and_public_menu(env):
     assert r.status_code == 200 and r["Content-Type"] == "image/png" and r.content.startswith(b"\x89PNG")
     url = env["admin"].get(f"/api/v1/branches/{env['main'].pk}/qr/?format=json").data["url"]
     token = url.rsplit("/", 1)[1]
-    assert f"/pharmacy/greenlife/menu/{token}" in url and len(token) >= 20
+    assert url.endswith(f"/greenlife/menu/{token}") and "/pharmacy/" not in url and len(token) >= 20
     assert env["admin"].get(f"/api/v1/branches/{env['main'].pk}/qr/?format=json").data["url"] == url  # stable
     assert env["cash2"].get(f"/api/v1/branches/{env['main'].pk}/qr/").status_code == 403  # cashiers cannot generate QR codes
     c = api()

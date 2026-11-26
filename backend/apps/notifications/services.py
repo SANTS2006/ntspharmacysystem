@@ -77,8 +77,8 @@ def render_platform_html(*, title: str, paragraphs: list[str], button=None, code
     """Template for emails sent by the platform itself (account, billing, backups, security). Uses the platform logo colours."""
     contact = settings.PLATFORM_CONTACT_EMAIL
     footer = (f'<strong style="color:#334155">{_esc(settings.PLATFORM_NAME)}</strong><br>You are receiving this email because of activity on your account.'
-              f'{("<br>Questions? Write to <a href=\'mailto:" + html.escape(contact, quote=True) + "\' style=\'color:#015dc9\'>" + _esc(contact) + "</a>.") if contact else ""}')
-    return _layout(brand=settings.PLATFORM_NAME, logo=_absolute("/logo.webp"), color="#015dc9", color2="#25bcfb", title=title, body=_body(paragraphs, code, button, "#015dc9"),
+              f'{("<br>Questions? Write to <a href=\'mailto:" + html.escape(contact, quote=True) + "\' style=\'color:#059669\'>" + _esc(contact) + "</a>.") if contact else ""}')
+    return _layout(brand=settings.PLATFORM_NAME, logo=_absolute("/logo.webp"), color="#059669", color2="#142d3d", title=title, body=_body(paragraphs, code, button, "#059669"),
                    footer=footer, preheader=preheader or (paragraphs[0] if paragraphs else title), eyebrow="Account notification")
 
 

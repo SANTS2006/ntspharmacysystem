@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { ApiError, api, openProtectedFile } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
+import { EmptyState, Loading, PageHeader, StatusBadge, useConfirm, usePrompt } from "../../components/ui";
 
 interface Page<T> { count: number; next: string | null; previous: string | null; results: T[] }
 interface Rx { id: number; reference_number: string; status: string; patient_name: string; prescriber_name: string; prescription_date: string; expiry_date: string; has_document: boolean }
@@ -14,11 +15,12 @@ interface RxDetail extends Rx {
   availability: { item: number; medicine: string; needed: number; available: number; sufficient: boolean }[];
 }
 const errText = (e: unknown) => (e instanceof ApiError ? `${e.message} ${e.details ? JSON.stringify(e.details) : ""}` : "Request failed.");
-const inputCls = "mt-1 w-full rounded border p-2 font-normal";
+const inputCls = "mt-1 w-full px-3 py-2 font-normal";
 const brand = { background: "var(--brand)" };
 const sev: Record<string, string> = { critical: "bg-red-100 text-red-800", warning: "bg-amber-100 text-amber-800", info: "bg-slate-100 text-slate-700" };
 
 function Detail({ id, onClose }: { id: number; onClose: () => void }) {
+  const promptFor = usePrompt(); const confirmDialog = useConfirm();
   const { user } = useAuth(); const qc = useQueryClient();
   const can = (p: string) => !!user?.permissions.includes(p);
   const [msg, setMsg] = useState<{ ok: boolean; t: string } | null>(null);
@@ -28,38 +30,41 @@ function Detail({ id, onClose }: { id: number; onClose: () => void }) {
     onSuccess: (d) => { qc.setQueryData(["rx", id], d); qc.invalidateQueries({ queryKey: ["rxs"] }); setMsg({ ok: true, t: "Saved." }); }, onError: (e) => setMsg({ ok: false, t: errText(e) }),
   });
   const upload = useMutation({ mutationFn: (f: File) => { const fd = new FormData(); fd.append("document", f); return api(`/prescriptions/${id}/document/`, { method: "POST", body: fd }); }, onSuccess: () => { qc.invalidateQueries({ queryKey: ["rx", id] }); setMsg({ ok: true, t: "Document attached." }); }, onError: (e) => setMsg({ ok: false, t: errText(e) }) });
-  if (q.isLoading || !q.data) return <p>Loading…</p>;
+  if (q.isLoading || !q.data) return <Loading />;
   const r = q.data; const base = `/prescriptions/${id}`;
-  const ask = (label: string) => window.prompt(label) ?? "";
-  const approve = () => { if (window.confirm("Confirm that you verified the prescriber and patient, and reviewed the dosage?")) act.mutate({ path: `${base}/approve/`, body: { verification: { prescriber_verified: true, patient_verified: true, dosage_reviewed: true } } }); };
-  const dispense = () => {
-    const lines = r.items.map((i) => ({ item: i.id, remaining: i.quantity_prescribed - i.quantity_dispensed, name: i.medicine_name })).filter((i) => i.remaining > 0)
-      .map((i) => ({ item: i.item, quantity: Number(window.prompt(`Enter the quantity to dispense for ${i.name} (remaining ${i.remaining}, 0 to skip)`, String(i.remaining)) || 0) })).filter((l) => l.quantity > 0);
+  const ask = async (label: string, title: string) => (await promptFor({ title, fields: [{ name: "text", label, type: "textarea" }] }))?.text ?? "";
+  const approve = async () => { if (await confirmDialog({ title: "Approve this prescription?", message: "Confirm that you verified the prescriber and patient, and reviewed the dosage.", confirmLabel: "I verified, approve" })) act.mutate({ path: `${base}/approve/`, body: { verification: { prescriber_verified: true, patient_verified: true, dosage_reviewed: true } } }); };
+  const dispense = async () => {
+    const open = r.items.map((i) => ({ item: i.id, remaining: i.quantity_prescribed - i.quantity_dispensed, name: i.medicine_name })).filter((i) => i.remaining > 0);
+    const v = await promptFor({ title: "Dispense medicines", message: "Enter the quantity to dispense for each item (0 to skip).", confirmLabel: "Dispense",
+      fields: open.map((i) => ({ name: String(i.item), label: `${i.name} (remaining ${i.remaining})`, type: "number" as const, min: 0, max: i.remaining, step: "1", defaultValue: String(i.remaining) })) });
+    if (!v) return;
+    const lines = open.map((i) => ({ item: i.item, quantity: Number(v[String(i.item)] || 0) })).filter((l) => l.quantity > 0);
     if (lines.length) act.mutate({ path: `/dispensing/prescriptions/${id}/`, body: { lines } });
   };
   return (
     <section aria-label="Prescription detail" className="space-y-3 rounded-xl border bg-white p-4 shadow">
-      <div className="flex justify-between"><h2 className="text-lg font-semibold">{r.reference_number} · {r.status.replace("_", " ")}</h2><button onClick={onClose} className="underline">Close</button></div>
+      <div className="flex justify-between"><h2 className="text-lg font-semibold">{r.reference_number} · {r.status.replace("_", " ")}</h2><button onClick={onClose} className="btn-link">Close</button></div>
       <p className="text-sm">Patient: <strong>{r.patient_name}</strong>{r.patient_allergies.length > 0 && <span className="ml-2 rounded bg-red-100 px-2 text-red-800">Allergies: {r.patient_allergies.join(", ")}</span>} · Prescriber: {r.prescriber_name} · Valid until {r.expiry_date} · Refills {r.refills_used}/{r.refills_allowed}</p>
       {msg && <p role={msg.ok ? "status" : "alert"} className={`rounded p-2 text-sm ${msg.ok ? "bg-green-50 text-green-800" : "bg-red-50 text-red-700"}`}>{msg.t}</p>}
-      <table className="w-full text-left text-sm"><thead className="bg-slate-100"><tr><th className="p-2">Medicine</th><th>Dose</th><th>Prescribed</th><th>Dispensed</th><th>In stock</th></tr></thead>
-        <tbody>{r.items.map((i) => { const a = r.availability.find((x) => x.item === i.id); return <tr key={i.id} className="border-t"><td className="p-2">{i.medicine_name} {i.classification !== "otc" && <span className="text-xs text-red-700">({i.classification})</span>}</td><td>{i.dosage}, {i.frequency}</td><td>{i.quantity_prescribed}</td><td>{i.quantity_dispensed}</td><td className={a && !a.sufficient ? "text-red-700" : ""}>{a?.available}</td></tr>; })}</tbody></table>
+      <table className="table"><thead><tr><th className="p-2">Medicine</th><th>Dose</th><th>Prescribed</th><th>Dispensed</th><th>In stock</th></tr></thead>
+        <tbody>{r.items.map((i) => { const a = r.availability.find((x) => x.item === i.id); return <tr key={i.id}><td className="p-2">{i.medicine_name} {i.classification !== "otc" && <span className="text-xs text-red-700">({i.classification})</span>}</td><td>{i.dosage}, {i.frequency}</td><td>{i.quantity_prescribed}</td><td>{i.quantity_dispensed}</td><td className={a && !a.sufficient ? "text-red-700" : ""}>{a?.available}</td></tr>; })}</tbody></table>
       <div><h3 className="font-semibold">Safety alerts <span className="text-xs font-normal text-slate-500">(system-generated; decisions are the pharmacist's)</span></h3>
         {r.safety_alerts.length === 0 && <p className="text-sm text-slate-500">None. This is not a clinical clearance.</p>}
-        <ul className="space-y-1">{r.safety_alerts.map((a) => <li key={a.id} className="rounded border p-2 text-sm"><span className={`mr-2 rounded px-2 text-xs ${sev[a.severity]}`}>{a.severity}</span>{a.message}
-          {a.decision ? <p className="mt-1 text-xs text-green-800">Pharmacist decision ({a.decided_by}): {a.decision_note}</p> : can("prescription.verify") && <button className="ml-2 underline" onClick={() => { const note = ask("Enter your decision about this alert"); if (note) act.mutate({ path: `${base}/alerts/${a.id}/acknowledge/`, body: { note } }); }}>Record decision</button>}</li>)}</ul></div>
+        <ul className="space-y-1">{r.safety_alerts.map((a) => <li key={a.id} className="px-3 py-2 text-sm"><span className={`mr-2 rounded px-2 text-xs ${sev[a.severity]}`}>{a.severity}</span>{a.message}
+          {a.decision ? <p className="mt-1 text-xs text-green-800">Pharmacist decision ({a.decided_by}): {a.decision_note}</p> : can("prescription.verify") && <button className="ml-2 underline" onClick={async () => { const note = await ask("Your decision about this alert", "Record pharmacist decision"); if (note) act.mutate({ path: `${base}/alerts/${a.id}/acknowledge/`, body: { note } }); }}>Record decision</button>}</li>)}</ul></div>
       {r.interventions.length > 0 && <div><h3 className="font-semibold">Clinical interventions</h3><ul className="text-sm">{r.interventions.map((i) => <li key={i.id}>{i.type}: {i.note} ({i.pharmacist})</li>)}</ul></div>}
       {r.dispensings.length > 0 && <div><h3 className="font-semibold">Dispensing history</h3><ul className="text-sm">{r.dispensings.map((d) => <li key={d.id}>{new Date(d.at).toLocaleString()} by {d.by}: {d.items.map((i) => `${i.medicine} ${i.quantity} (batch ${i.batch})`).join(", ")}</li>)}</ul></div>}
       <div className="flex flex-wrap items-center gap-2">
-        {r.has_document && <button className="rounded border px-3 py-1" onClick={() => openProtectedFile(`${base}/document/`).catch((e) => setMsg({ ok: false, t: errText(e) }))}>Open document</button>}
+        {r.has_document && <button className="btn btn-outline btn-sm" onClick={() => openProtectedFile(`${base}/document/`).catch((e) => setMsg({ ok: false, t: errText(e) }))}>Open document</button>}
         {can("prescription.register") && ["received", "under_review", "approved", "partially_dispensed"].includes(r.status) && <label className="text-sm">Attach document <input type="file" accept="application/pdf,image/png,image/jpeg,image/webp" onChange={(e) => e.target.files?.[0] && upload.mutate(e.target.files[0])} /></label>}
-        {can("prescription.verify") && r.status === "received" && <button className="rounded px-3 py-1 text-white" style={brand} onClick={() => act.mutate({ path: `${base}/start-review/` })}>Start pharmacist review</button>}
-        {can("prescription.verify") && r.status === "under_review" && <><button className="rounded px-3 py-1 text-white" style={brand} onClick={approve}>Approve</button><button className="rounded border px-3 py-1" onClick={() => act.mutate({ path: `${base}/recheck-safety/` })}>Re-run safety checks</button></>}
-        {can("prescription.verify") && ["received", "under_review"].includes(r.status) && <button className="rounded border px-3 py-1" onClick={() => { const reason = ask("Enter the rejection reason"); if (reason) act.mutate({ path: `${base}/reject/`, body: { reason } }); }}>Reject</button>}
-        {can("prescription.verify") && ["received", "under_review", "approved", "partially_dispensed"].includes(r.status) && <button className="rounded border px-3 py-1" onClick={() => { const reason = ask("Enter the cancellation reason"); if (reason) act.mutate({ path: `${base}/cancel/`, body: { reason } }); }}>Cancel</button>}
-        {can("prescription.verify") && r.status !== "rejected" && <button className="rounded border px-3 py-1" onClick={() => { const type = ask("Enter the intervention type"); const note = type && ask("Enter the intervention note"); if (type && note) act.mutate({ path: `${base}/interventions/`, body: { type, note } }); }}>Record intervention</button>}
-        {can("prescription.dispense") && ["approved", "partially_dispensed"].includes(r.status) && <button className="rounded px-3 py-1 text-white" style={brand} onClick={dispense}>Dispense</button>}
-        {can("prescription.dispense") && r.status === "dispensed" && r.refills_used < r.refills_allowed && <button className="rounded border px-3 py-1" onClick={() => act.mutate({ path: `${base}/refill/` })}>Authorize refill</button>}
+        {can("prescription.verify") && r.status === "received" && <button className="btn btn-primary" onClick={() => act.mutate({ path: `${base}/start-review/` })}>Start pharmacist review</button>}
+        {can("prescription.verify") && r.status === "under_review" && <><button className="btn btn-primary" onClick={approve}>Approve</button><button className="btn btn-outline btn-sm" onClick={() => act.mutate({ path: `${base}/recheck-safety/` })}>Re-run safety checks</button></>}
+        {can("prescription.verify") && ["received", "under_review"].includes(r.status) && <button className="btn btn-outline btn-sm" onClick={async () => { const reason = await ask("Rejection reason", "Reject prescription"); if (reason) act.mutate({ path: `${base}/reject/`, body: { reason } }); }}>Reject</button>}
+        {can("prescription.verify") && ["received", "under_review", "approved", "partially_dispensed"].includes(r.status) && <button className="btn btn-outline btn-sm" onClick={async () => { const reason = await ask("Cancellation reason", "Cancel prescription"); if (reason) act.mutate({ path: `${base}/cancel/`, body: { reason } }); }}>Cancel</button>}
+        {can("prescription.verify") && r.status !== "rejected" && <button className="btn btn-outline btn-sm" onClick={async () => { const v = await promptFor({ title: "Record intervention", fields: [{ name: "type", label: "Intervention type" }, { name: "note", label: "Intervention note", type: "textarea" }] }); if (v?.type && v.note) act.mutate({ path: `${base}/interventions/`, body: { type: v.type, note: v.note } }); }}>Record intervention</button>}
+        {can("prescription.dispense") && ["approved", "partially_dispensed"].includes(r.status) && <button className="btn btn-primary" onClick={dispense}>Dispense</button>}
+        {can("prescription.dispense") && r.status === "dispensed" && r.refills_used < r.refills_allowed && <button className="btn btn-outline btn-sm" onClick={() => act.mutate({ path: `${base}/refill/` })}>Authorize refill</button>}
       </div>
     </section>
   );
@@ -84,25 +89,25 @@ export default function PrescriptionsPage() {
   const inp = (k: keyof typeof f, label: string, ph: string, type = "text", req = true) => <label className="text-sm font-medium">{label}<input type={type} required={req} className={inputCls} placeholder={ph} value={f[k]} onChange={set(k)} /></label>;
   return (
     <div className="space-y-4">
-      <h1 className="text-2xl font-semibold">Prescriptions</h1>
+      <PageHeader title="Prescriptions" subtitle="Review, approve and dispense prescriptions safely." />
       {can("prescription.register") && (
-        <form onSubmit={(e) => { e.preventDefault(); create.mutate(); }} className="grid gap-3 rounded-xl bg-white p-4 shadow-sm md:grid-cols-4">
+        <form onSubmit={(e) => { e.preventDefault(); create.mutate(); }} className="grid gap-3 card p-4  md:grid-cols-4">
           <h2 className="font-semibold md:col-span-4">Register a prescription</h2>
           {inp("patient_name", "Patient name", "Enter the patient's full name")}{inp("phone", "Patient phone", "Enter the patient's phone", "tel", false)}{inp("dob", "Date of birth", "", "date", false)}{inp("allergies", "Allergies (comma separated)", "Enter known allergies", "text", false)}
           {inp("prescriber_name", "Prescriber", "Enter the prescriber's name")}{inp("prescriber_registration", "Prescriber registration", "Enter the registration number", "text", false)}{inp("prescription_date", "Prescription date", "", "date")}
           <label className="text-sm font-medium">Branch<select required className={inputCls} value={f.branch} onChange={set("branch")}><option value="">Select a branch</option>{branches.data?.results.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select></label>
           <label className="text-sm font-medium">Medicine<select required className={inputCls} value={f.medicine} onChange={set("medicine")}><option value="">Select a medicine</option>{meds.data?.results.map((m) => <option key={m.id} value={m.id}>{m.name} {m.strength}</option>)}</select></label>
           {inp("dosage", "Dosage", "Enter the dosage")}{inp("frequency", "Frequency", "Enter the frequency")}{inp("quantity", "Quantity", "Enter the quantity", "number")}{inp("refills", "Refills allowed", "Enter refills allowed", "number", false)}
-          <button disabled={create.isPending} className="self-end rounded px-4 py-2 text-white" style={brand}>Register</button>
+          <button disabled={create.isPending} className="btn btn-primary self-end">Register</button>
           {err && <p role="alert" className="rounded bg-red-50 p-2 text-sm text-red-700 md:col-span-4">{err}</p>}
         </form>)}
       {open && <Detail id={open} onClose={() => setOpen(null)} />}
-      <div className="flex gap-2"><input aria-label="Search prescriptions" placeholder="Enter a reference or patient name" value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} className="w-72 rounded border p-2" />
-        <select aria-label="Filter by status" value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); }} className="rounded border p-2"><option value="">All statuses</option>{["received", "under_review", "approved", "partially_dispensed", "dispensed", "rejected", "cancelled"].map((s) => <option key={s} value={s}>{s.replace("_", " ")}</option>)}</select></div>
-      {list.isLoading && <p>Loading…</p>}{list.data?.results.length === 0 && <p className="text-slate-500">No prescriptions.</p>}
-      {list.data && list.data.results.length > 0 && <div className="overflow-x-auto rounded-xl bg-white shadow-sm"><table className="w-full text-left text-sm"><thead className="bg-slate-100"><tr><th className="p-3">Reference</th><th>Patient</th><th>Prescriber</th><th>Date</th><th>Status</th><th /></tr></thead>
-        <tbody>{list.data.results.map((r) => <tr key={r.id} className="border-t"><td className="p-3">{r.reference_number}</td><td>{r.patient_name}</td><td>{r.prescriber_name}</td><td>{r.prescription_date}</td><td>{r.status.replace("_", " ")}</td><td><button className="underline" onClick={() => setOpen(r.id)}>Open</button></td></tr>)}</tbody></table></div>}
-      <div className="flex gap-2"><button disabled={!list.data?.previous} onClick={() => setPage(page - 1)} className="rounded border px-3 py-1 disabled:opacity-40">Previous</button><button disabled={!list.data?.next} onClick={() => setPage(page + 1)} className="rounded border px-3 py-1 disabled:opacity-40">Next</button></div>
+      <div className="flex gap-2"><input aria-label="Search prescriptions" placeholder="Enter a reference or patient name" value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} className="w-72 px-3 py-2" />
+        <select aria-label="Filter by status" value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); }} className="px-3 py-2"><option value="">All statuses</option>{["received", "under_review", "approved", "partially_dispensed", "dispensed", "rejected", "cancelled"].map((s) => <option key={s} value={s}>{s.replace("_", " ")}</option>)}</select></div>
+      {list.isLoading && <Loading />}{list.data?.results.length === 0 && <EmptyState>No prescriptions.</EmptyState>}
+      {list.data && list.data.results.length > 0 && <div className="table-wrap"><table className="table"><thead><tr><th>Reference</th><th>Patient</th><th>Prescriber</th><th>Date</th><th>Status</th><th /></tr></thead>
+        <tbody>{list.data.results.map((r) => <tr key={r.id}><td>{r.reference_number}</td><td>{r.patient_name}</td><td>{r.prescriber_name}</td><td>{r.prescription_date}</td><td><StatusBadge status={r.status} /></td><td><button className="btn-link" onClick={() => setOpen(r.id)}>Open</button></td></tr>)}</tbody></table></div>}
+      <div className="flex gap-2"><button disabled={!list.data?.previous} onClick={() => setPage(page - 1)} className="btn btn-outline btn-sm">Previous</button><button disabled={!list.data?.next} onClick={() => setPage(page + 1)} className="btn btn-outline btn-sm">Next</button></div>
     </div>
   );
 }

@@ -17,7 +17,7 @@ services:
       - key: DJANGO_DEBUG
         value: "False"
       - key: PLATFORM_NAME
-        value: PharmaCloud
+        value: NTS Pharmacy System
       - key: CELERY_TASK_ALWAYS_EAGER
         value: "True"
       - key: REDIS_URL

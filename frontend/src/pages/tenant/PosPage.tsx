@@ -1,5 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ArrowDownToLine, ArrowUpFromLine, Banknote, CheckCircle2, CreditCard, FileText, Landmark, Lock, Mail, Minus, Plus, Printer, ScanBarcode, Search, ShoppingCart, Smartphone, Trash2, Wallet } from "lucide-react";
 import { useRef, useState } from "react";
+import { EmptyState, Loading, Modal, PageHeader, StatusBadge, useConfirm, usePrompt, useToast } from "../../components/ui";
 import { ApiError, api, openProtectedFile } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
 
@@ -12,124 +14,226 @@ interface Pending { id: number; prescription: string; patient: string; estimated
 interface CartLine { product: Product; quantity: number; discount_pct: number }
 
 const errText = (e: unknown) => (e instanceof ApiError ? `${e.message} ${e.details ? JSON.stringify(e.details) : ""}` : "Request failed.");
-const inputCls = "rounded border p-2";
-const brand = { background: "var(--brand)" };
 const money = (n: number) => n.toFixed(2);
+const METHODS = [["cash", "Cash", Banknote], ["mobile_money", "Mobile money", Smartphone], ["card", "Card", CreditCard], ["bank_transfer", "Bank transfer", Landmark]] as const;
+const methodLabel = (m: string) => METHODS.find((x) => x[0] === m)?.[1] ?? m;
 
 export default function PosPage() {
   const { user } = useAuth(); const qc = useQueryClient();
+  const confirmDialog = useConfirm(); const promptFor = usePrompt(); const toast = useToast();
   const can = (p: string) => !!user?.permissions.includes(p);
   const [msg, setMsg] = useState<{ ok: boolean; t: string } | null>(null);
+  const succeed = (t: string) => { setMsg(null); toast(t); };
   const fail = (e: unknown) => setMsg({ ok: false, t: errText(e) });
   const refresh = () => qc.invalidateQueries();
 
-  const shift = useQuery({ queryKey: ["shift"], queryFn: () => api<Shift | null>("/shifts/current/") });
+  const shift = useQuery({ queryKey: ["shift"], queryFn: () => api<Shift | null>("/shifts/current/").then((s) => (s?.id ? s : null)) }); // "no open shift" arrives as an empty body
   const history = useQuery({ queryKey: ["sales"], queryFn: () => api<Page<SaleRow>>("/sales/") });
   const pending = useQuery({ queryKey: ["pending-disp", shift.data?.id], queryFn: () => api<Pending[]>("/pos/pending-dispensings/"), enabled: !!shift.data });
   const branches = useQuery({ queryKey: ["branches"], queryFn: () => api<Page<{ id: number; name: string }>>("/branches/"), enabled: can("branch.view") && !user?.branch });
 
   // ---------- shift ----------
   const [opening, setOpening] = useState("0"); const [branch, setBranch] = useState(user?.branch ? String(user.branch) : "");
-  const openShift = useMutation({ mutationFn: () => api("/shifts/open/", { method: "POST", body: { opening_cash: opening, branch: branch ? Number(branch) : undefined } }), onSuccess: () => { setMsg({ ok: true, t: "Shift opened." }); refresh(); }, onError: fail });
-  const closeShift = () => {
+  const openShift = useMutation({ mutationFn: () => api("/shifts/open/", { method: "POST", body: { opening_cash: opening, branch: branch ? Number(branch) : undefined } }), onSuccess: () => { succeed("Shift opened."); refresh(); }, onError: fail });
+  const closeShift = async () => {
     const sh = shift.data; if (!sh) return;
-    const counted = window.prompt(`Enter the counted cash in the drawer (expected ${sh.totals.expected_cash})`); if (counted === null) return;
-    if (window.confirm("Close the shift? This cannot be undone.")) api(`/shifts/${sh.id}/close/`, { method: "POST", body: { counted_cash: counted } }).then((r) => { const d = r as { discrepancy: string }; setMsg({ ok: true, t: `Shift closed. Discrepancy: ${d.discrepancy}` }); refresh(); }).catch(fail);
+    const v = await promptFor({ title: "Close shift", message: <>Expected cash in the drawer: <strong>{sh.totals.expected_cash}</strong></>, confirmLabel: "Continue", fields: [{ name: "counted", label: "Counted cash", type: "number", min: 0, step: "0.01" }] });
+    if (!v) return;
+    if (await confirmDialog({ title: "Close the shift?", message: "This cannot be undone.", confirmLabel: "Close shift", danger: true })) api(`/shifts/${sh.id}/close/`, { method: "POST", body: { counted_cash: v.counted } }).then((r) => { const d = r as { discrepancy: string }; setMsg({ ok: true, t: `Shift closed. Discrepancy: ${d.discrepancy}` }); refresh(); }).catch(fail);
   };
-  const cashMove = (kind: "withdrawal" | "deposit") => {
-    const amount = window.prompt(`Enter the ${kind} amount`); if (!amount) return; const reason = window.prompt("Enter the reason"); if (!reason) return;
-    api(`/shifts/${shift.data!.id}/cash-movements/`, { method: "POST", body: { kind, amount, reason } }).then(() => { setMsg({ ok: true, t: kind === "withdrawal" ? "Withdrawal requested: a manager must approve it." : "Deposit recorded." }); refresh(); }).catch(fail);
+  const cashMove = async (kind: "withdrawal" | "deposit") => {
+    const v = await promptFor({ title: kind === "deposit" ? "Cash deposit" : "Cash withdrawal", confirmLabel: "Record", fields: [{ name: "amount", label: "Amount", type: "number", min: 0.01, step: "0.01" }, { name: "reason", label: "Reason" }] });
+    if (!v) return;
+    api(`/shifts/${shift.data!.id}/cash-movements/`, { method: "POST", body: { kind, amount: v.amount, reason: v.reason } }).then(() => { succeed(kind === "withdrawal" ? "Withdrawal requested: a manager must approve it." : "Deposit recorded."); refresh(); }).catch(fail);
   };
 
   // ---------- cart ----------
   const [term, setTerm] = useState(""); const [cart, setCart] = useState<CartLine[]>([]); const [billing, setBilling] = useState<number[]>([]);
   const [tender, setTender] = useState({ method: "cash", amount: "", reference: "" }); const [payments, setPayments] = useState<{ method: string; amount: string; reference: string }[]>([]);
   const [customer, setCustomer] = useState(""); const idemKey = useRef(crypto.randomUUID());
+  const searchBox = useRef<HTMLInputElement>(null);
   const results = useQuery({ queryKey: ["pos-search", term], queryFn: () => api<Product[]>(`/pos/products/?${/^\d{6,}$/.test(term) ? "barcode" : "search"}=${encodeURIComponent(term)}`), enabled: term.length >= 2 && !!shift.data });
-  const addProduct = (p: Product) => { if (p.requires_prescription) { setMsg({ ok: false, t: `${p.name} needs a pharmacist to dispense it against an approved prescription first.` }); return; } setCart((c) => c.some((l) => l.product.id === p.id) ? c.map((l) => l.product.id === p.id ? { ...l, quantity: l.quantity + 1 } : l) : [...c, { product: p, quantity: 1, discount_pct: 0 }]); setTerm(""); };
+  const addProduct = (p: Product) => { if (p.requires_prescription) { setMsg({ ok: false, t: `${p.name} needs a pharmacist to dispense it against an approved prescription first.` }); return; } setMsg(null); setCart((c) => c.some((l) => l.product.id === p.id) ? c.map((l) => l.product.id === p.id ? { ...l, quantity: l.quantity + 1 } : l) : [...c, { product: p, quantity: 1, discount_pct: 0 }]); setTerm(""); searchBox.current?.focus(); };
+  const patchLine = (id: number, patch: Partial<CartLine>) => setCart((c) => c.map((x) => (x.product.id === id ? { ...x, ...patch } : x)));
   const pend = pending.data?.filter((d) => billing.includes(d.id)) ?? [];
   // Display estimate only: the server recomputes every amount.
-  const est = cart.reduce((t, l) => { const net = Number(l.product.price) * l.quantity * (1 - l.discount_pct / 100); return t + net * (1 + Number(l.product.tax_rate) / 100); }, 0) + pend.reduce((t, d) => t + Number(d.estimated_total), 0);
+  const gross = cart.reduce((t, l) => t + Number(l.product.price) * l.quantity, 0);
+  const discount = cart.reduce((t, l) => t + Number(l.product.price) * l.quantity * (l.discount_pct / 100), 0);
+  const tax = cart.reduce((t, l) => t + Number(l.product.price) * l.quantity * (1 - l.discount_pct / 100) * (Number(l.product.tax_rate) / 100), 0);
+  const rxTotal = pend.reduce((t, d) => t + Number(d.estimated_total), 0);
+  const est = gross - discount + tax + rxTotal;
   const tendered = payments.reduce((t, p) => t + Number(p.amount || 0), 0);
+  const addPayment = () => { if (Number(tender.amount) > 0) { setPayments([...payments, tender]); setTender({ method: "cash", amount: "", reference: "" }); } };
 
   const [receipt, setReceipt] = useState<SaleDetail | null>(null);
   const checkout = useMutation({
     mutationFn: () => api<SaleDetail>("/sales/", { method: "POST", headers: { "Idempotency-Key": idemKey.current }, body: { items: cart.map((l) => ({ medicine: l.product.id, quantity: l.quantity, discount_pct: l.discount_pct })), dispensing_ids: billing, payments, customer_name: customer } }),
-    onSuccess: (s) => { setReceipt(s); setCart([]); setBilling([]); setPayments([]); setCustomer(""); idemKey.current = crypto.randomUUID(); setMsg({ ok: true, t: `Sale ${s.reference_number} completed.` }); refresh(); },
+    onSuccess: (s) => { setReceipt(s); setCart([]); setBilling([]); setPayments([]); setCustomer(""); idemKey.current = crypto.randomUUID(); succeed(`Sale ${s.reference_number} completed.`); refresh(); },
     onError: fail, // the same idempotency key is kept so a retry can never double-charge
   });
 
   const sellRef = async (s: SaleRow | SaleDetail) => { try { await openProtectedFile(`/sales/${s.id}/receipt/pdf/`); } catch (e) { fail(e); } };
-  const emailReceipt = (s: SaleRow | SaleDetail) => { const email = window.prompt("Enter the customer's email address"); if (email) api(`/sales/${s.id}/receipt/email/`, { method: "POST", body: { email } }).then(() => setMsg({ ok: true, t: "Receipt queued for email." })).catch(fail); };
-  const refund = (s: SaleRow, cancel: boolean) => {
-    const reason = window.prompt(cancel ? "Enter the reason for cancelling this sale" : "Enter the return reason"); if (!reason) return;
-    const method = window.prompt("Enter the refund method (cash, mobile_money, card, bank_transfer)", "cash"); if (!method) return;
-    const reference = method === "cash" ? "" : window.prompt("Enter the refund reference") ?? "";
-    const run = async () => {
-      if (cancel) return api(`/sales/${s.id}/cancel/`, { method: "POST", body: { reason, refund_method: method, refund_reference: reference } });
-      const d = await api<SaleDetail>(`/sales/${s.id}/`);
-      const lines = d.lines.map((l) => ({ l, max: l.quantity - l.quantity_returned })).filter((x) => x.max > 0).map((x) => ({ sale_line: x.l.id, quantity: Number(window.prompt(`Enter the quantity to return for ${x.l.name} (max ${x.max}, 0 to skip)`, "0") || 0) })).filter((x) => x.quantity > 0);
-      if (!lines.length) return null;
-      const restock = window.confirm("Return the items to sellable stock? (Never for damaged goods or dispensed prescriptions.)");
-      return api(`/sales/${s.id}/return/`, { method: "POST", body: { lines, reason, refund_method: method, refund_reference: reference, restock } });
-    };
-    if (window.confirm(`${cancel ? "Cancel" : "Return items on"} sale ${s.reference_number}? A credit note is issued and this is permanent.`)) run().then((r) => { if (r) { setMsg({ ok: true, t: "Credit note issued." }); refresh(); } }).catch(fail);
+  const emailReceipt = async (s: SaleRow | SaleDetail) => {
+    const v = await promptFor({ title: "Email receipt", confirmLabel: "Send receipt", fields: [{ name: "email", label: "Customer's email address", type: "email" }] });
+    if (v?.email) api(`/sales/${s.id}/receipt/email/`, { method: "POST", body: { email: v.email } }).then(() => succeed("Receipt queued for email.")).catch(fail);
+  };
+  const refund = async (s: SaleRow, cancel: boolean) => {
+    const v = await promptFor({ title: `${cancel ? "Cancel sale" : "Return items"} · ${s.reference_number}`, confirmLabel: "Continue", danger: true, fields: [
+      { name: "reason", label: cancel ? "Reason for cancelling this sale" : "Return reason", type: "textarea" },
+      { name: "method", label: "Refund method", type: "select", defaultValue: "cash", options: METHODS.map((m) => [m[0], m[1]]) },
+      { name: "reference", label: "Refund reference (not needed for cash)", required: false }] });
+    if (!v) return;
+    const { reason, method } = v;
+    const reference = method === "cash" ? "" : v.reference;
+    if (!(await confirmDialog({ title: `${cancel ? "Cancel" : "Return items on"} sale ${s.reference_number}?`, message: "A credit note is issued and this is permanent.", confirmLabel: cancel ? "Cancel sale" : "Continue return", danger: true }))) return;
+    try {
+      if (cancel) {
+        await api(`/sales/${s.id}/cancel/`, { method: "POST", body: { reason, refund_method: method, refund_reference: reference } });
+      } else {
+        const d = await api<SaleDetail>(`/sales/${s.id}/`);
+        const open = d.lines.map((l) => ({ l, max: l.quantity - l.quantity_returned })).filter((x) => x.max > 0);
+        const r = await promptFor({ title: "Quantities to return", confirmLabel: "Issue credit note", danger: true, fields: [
+          ...open.map((x) => ({ name: String(x.l.id), label: `${x.l.name} (max ${x.max}, 0 to skip)`, type: "number" as const, min: 0, max: x.max, step: "1", defaultValue: "0" })),
+          { name: "restock", label: "Return the items to sellable stock? (Never for damaged goods or dispensed prescriptions.)", type: "select", defaultValue: "no", options: [["no", "No, do not restock"], ["yes", "Yes, return to stock"]] }] });
+        if (!r) return;
+        const lines = open.map((x) => ({ sale_line: x.l.id, quantity: Number(r[String(x.l.id)] || 0) })).filter((x) => x.quantity > 0);
+        if (!lines.length) return;
+        await api(`/sales/${s.id}/return/`, { method: "POST", body: { lines, reason, refund_method: method, refund_reference: reference, restock: r.restock === "yes" } });
+      }
+      succeed("Credit note issued."); refresh();
+    } catch (e) { fail(e); }
   };
 
   const sh = shift.data;
   return (
-    <div className="space-y-4">
-      <h1 className="text-2xl font-semibold">Point of sale</h1>
-      {msg && <p role={msg.ok ? "status" : "alert"} className={`rounded p-3 text-sm ${msg.ok ? "bg-green-50 text-green-800" : "bg-red-50 text-red-700"}`}>{msg.t}</p>}
-      {!sh && can("pos.sell") && (
-        <form onSubmit={(e) => { e.preventDefault(); openShift.mutate(); }} className="flex flex-wrap items-end gap-3 rounded-xl bg-white p-4 shadow-sm">
-          <label className="text-sm font-medium">Opening cash<input type="number" min="0" step="0.01" required className={`${inputCls} mt-1 block`} value={opening} onChange={(e) => setOpening(e.target.value)} placeholder="Enter the opening cash" /></label>
-          {!user?.branch && <label className="text-sm font-medium">Branch<select required className={`${inputCls} mt-1 block`} value={branch} onChange={(e) => setBranch(e.target.value)}><option value="">Select a branch</option>{branches.data?.results.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select></label>}
-          <button className="rounded px-4 py-2 text-white" style={brand}>Start shift</button><p className="text-sm text-slate-600">You must open a shift before selling.</p>
+    <div className="space-y-5">
+      <PageHeader title="Point of sale" subtitle="Search or scan medicines, take payment and print the receipt."
+        actions={sh && <>
+          <button className="btn btn-outline btn-sm" onClick={() => cashMove("deposit")}><ArrowDownToLine size={15} aria-hidden />Cash deposit</button>
+          <button className="btn btn-outline btn-sm" onClick={() => cashMove("withdrawal")}><ArrowUpFromLine size={15} aria-hidden />Cash withdrawal</button>
+          <button className="btn btn-secondary btn-sm" onClick={closeShift}><Lock size={15} aria-hidden />Close shift</button></>} />
+      {msg && <p role={msg.ok ? "status" : "alert"} className={`alert ${msg.ok ? "alert-success" : "alert-error"}`}>{msg.t}</p>}
+      {shift.isLoading && <Loading rows={2} />}
+
+      {!shift.isLoading && !sh && can("pos.sell") && (
+        <form onSubmit={(e) => { e.preventDefault(); openShift.mutate(); }} className="card mx-auto max-w-lg space-y-4 p-6">
+          <div className="flex items-center gap-3"><span className="grid h-11 w-11 place-items-center rounded-xl bg-teal-50 text-teal-700"><Wallet size={22} aria-hidden /></span><div><h2 className="section-title">Start your shift</h2><p className="text-sm text-muted">You must open a shift before selling.</p></div></div>
+          <label className="field-label">Opening cash<input type="number" min="0" step="0.01" required className="mt-1 w-full px-3 py-2" value={opening} onChange={(e) => setOpening(e.target.value)} placeholder="Enter the opening cash" /></label>
+          {!user?.branch && <label className="field-label">Branch<select required className="mt-1 w-full px-3 py-2" value={branch} onChange={(e) => setBranch(e.target.value)}><option value="">Select a branch</option>{branches.data?.results.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select></label>}
+          <button className="btn btn-primary w-full" disabled={openShift.isPending}>Start shift</button>
         </form>)}
+
       {sh && (
-        <section className="flex flex-wrap items-center gap-4 rounded-xl bg-white p-3 text-sm shadow-sm">
-          <span>Shift open · {sh.totals.sales_count} sales · {sh.totals.sales_total} · expected cash <strong>{sh.totals.expected_cash}</strong></span>
-          <button className="underline" onClick={() => cashMove("deposit")}>Cash deposit</button><button className="underline" onClick={() => cashMove("withdrawal")}>Cash withdrawal</button><button className="underline" onClick={closeShift}>Close shift</button>
-          {sh.cash_movements.filter((m) => m.status === "pending").map((m) => <span key={m.id} className="rounded bg-amber-100 px-2 text-amber-800">Withdrawal {m.amount} awaiting approval {can("sales.refund") && <button className="underline" onClick={() => api(`/cash-movements/${m.id}/approve/`, { method: "POST" }).then(refresh).catch(fail)}>Approve</button>}</span>)}
-        </section>)}
+        <div className="card flex flex-wrap items-center gap-x-8 gap-y-2 px-4 py-3 text-sm">
+          <span className="badge badge-success">Shift open</span>
+          <span><span className="text-muted">Sales </span><strong className="tabular-nums">{sh.totals.sales_count}</strong></span>
+          <span><span className="text-muted">Sales total </span><strong className="tabular-nums">{sh.totals.sales_total}</strong></span>
+          <span><span className="text-muted">Expected cash </span><strong className="tabular-nums">{sh.totals.expected_cash}</strong></span>
+          {sh.cash_movements.filter((m) => m.status === "pending").map((m) => <span key={m.id} className="flex items-center gap-2"><span className="badge badge-warning">Withdrawal {m.amount} awaiting approval</span>{can("sales.refund") && <button className="btn-link" onClick={() => api(`/cash-movements/${m.id}/approve/`, { method: "POST" }).then(refresh).catch(fail)}>Approve</button>}</span>)}
+        </div>)}
 
       {sh && can("pos.sell") && (
-        <div className="grid gap-4 lg:grid-cols-2">
-          <section className="space-y-2 rounded-xl bg-white p-4 shadow-sm">
-            <input autoFocus aria-label="Search products or scan a barcode" placeholder="Enter a product name or scan a barcode" className={`${inputCls} w-full`} value={term} onChange={(e) => setTerm(e.target.value)} />
-            <ul className="divide-y text-sm">{results.data?.map((p) => <li key={p.id}><button className="flex w-full justify-between py-2 text-left hover:bg-slate-50" onClick={() => addProduct(p)}><span>{p.name} {p.strength} {p.requires_prescription && <em className="text-red-700">(Rx)</em>}</span><span>{p.price} · stock {p.stock}</span></button></li>)}</ul>
-            {pending.data && pending.data.length > 0 && <div><h2 className="font-semibold">Dispensed prescriptions awaiting payment</h2>{pending.data.map((d) => <label key={d.id} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={billing.includes(d.id)} onChange={(e) => setBilling(e.target.checked ? [...billing, d.id] : billing.filter((x) => x !== d.id))} />{d.prescription} · {d.patient} · ≈{d.estimated_total}</label>)}</div>}
-          </section>
-          <section className="space-y-2 rounded-xl bg-white p-4 shadow-sm">
-            <h2 className="font-semibold">Cart</h2>
-            {cart.length === 0 && pend.length === 0 && <p className="text-sm text-slate-500">Cart is empty.</p>}
-            {cart.map((l) => <div key={l.product.id} className="flex items-center gap-2 text-sm"><span className="flex-1">{l.product.name}</span>
-              <input aria-label={`Quantity of ${l.product.name}`} type="number" min="1" className="w-16 rounded border p-1" value={l.quantity} onChange={(e) => setCart(cart.map((x) => x.product.id === l.product.id ? { ...x, quantity: Math.max(1, Number(e.target.value)) } : x))} />
-              <input aria-label={`Discount percent for ${l.product.name}`} type="number" min="0" max="100" className="w-16 rounded border p-1" value={l.discount_pct} onChange={(e) => setCart(cart.map((x) => x.product.id === l.product.id ? { ...x, discount_pct: Number(e.target.value) } : x))} placeholder="%" />
-              <button className="underline" onClick={() => setCart(cart.filter((x) => x.product.id !== l.product.id))}>Remove</button></div>)}
-            {pend.map((d) => <p key={d.id} className="text-sm">Prescription {d.prescription}: {d.items.map((i) => `${i.medicine} × ${i.quantity}`).join(", ")}</p>)}
-            <p className="text-lg font-semibold">Estimated total: {money(est)} <span className="text-xs font-normal text-slate-500">(final amount is calculated by the server)</span></p>
-            <input aria-label="Customer name" className={`${inputCls} w-full`} placeholder="Enter the customer's name (optional)" value={customer} onChange={(e) => setCustomer(e.target.value)} />
-            <div className="flex flex-wrap gap-2"><select aria-label="Payment method" className={inputCls} value={tender.method} onChange={(e) => setTender({ ...tender, method: e.target.value })}><option value="cash">Cash</option><option value="mobile_money">Mobile money</option><option value="card">Card</option><option value="bank_transfer">Bank transfer</option></select>
-              <input aria-label="Amount tendered" type="number" min="0.01" step="0.01" className={`${inputCls} w-28`} placeholder="Enter the amount" value={tender.amount} onChange={(e) => setTender({ ...tender, amount: e.target.value })} />
-              {tender.method !== "cash" && <input aria-label="Transaction reference" className={`${inputCls} w-40`} placeholder="Enter the reference" value={tender.reference} onChange={(e) => setTender({ ...tender, reference: e.target.value })} />}
-              <button className="rounded border px-3" onClick={() => { if (Number(tender.amount) > 0) { setPayments([...payments, tender]); setTender({ method: "cash", amount: "", reference: "" }); } }}>Add payment</button></div>
-            <ul className="text-sm">{payments.map((p, i) => <li key={i}>{p.method} {p.amount} {p.reference} <button className="underline" onClick={() => setPayments(payments.filter((_, j) => j !== i))}>remove</button></li>)}</ul>
-            <p className="text-sm">Tendered {money(tendered)} · change ≈ {money(Math.max(0, tendered - est))}</p>
-            <button disabled={checkout.isPending || (cart.length === 0 && billing.length === 0)} onClick={() => checkout.mutate()} className="w-full rounded px-4 py-2 text-white disabled:opacity-50" style={brand}>{checkout.isPending ? "Processing…" : "Complete sale"}</button>
+        <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_26rem]">
+          <div className="space-y-4">
+            <section aria-label="Find medicines" className="card p-4">
+              <div className="relative">
+                <Search size={18} aria-hidden className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input ref={searchBox} autoFocus aria-label="Search products or scan a barcode" placeholder="Search by name, or scan a barcode" className="w-full py-3 pl-11 pr-11 !text-base" value={term} onChange={(e) => setTerm(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter" && results.data?.length === 1) { e.preventDefault(); addProduct(results.data[0]); } }} />
+                <ScanBarcode size={20} aria-hidden className="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+              </div>
+              {term.length < 2 && <p className="px-1 pt-6 pb-4 text-center text-sm text-muted">Type at least two characters or scan a barcode to find medicines.</p>}
+              {results.isFetching && <p role="status" className="pt-3 text-sm text-muted">Searching…</p>}
+              {term.length >= 2 && results.data?.length === 0 && <p className="pt-6 pb-4 text-center text-sm text-muted">No medicines match “{term}”.</p>}
+              {results.isError && <p role="alert" className="alert alert-error mt-3">{errText(results.error)}</p>}
+              {!!results.data?.length && (
+                <ul className="mt-4 grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
+                  {results.data.map((p) => (
+                    <li key={p.id}>
+                      <button type="button" onClick={() => addProduct(p)} className="flex h-full w-full flex-col rounded-xl border border-line bg-white p-3.5 text-left transition hover:border-primary hover:shadow-md">
+                        <span className="flex items-start justify-between gap-2"><span className="font-semibold leading-snug">{p.name}</span>{p.requires_prescription && <span className="badge badge-danger">Rx</span>}</span>
+                        <span className="text-xs text-muted">{p.strength}</span>
+                        <span className="mt-3 flex items-end justify-between"><span className="text-lg font-bold tabular-nums text-teal-700">{p.price}</span><span className={`text-xs font-medium ${p.stock <= 0 ? "text-danger" : "text-muted"}`}>{p.stock} in stock</span></span>
+                      </button>
+                    </li>))}
+                </ul>)}
+            </section>
+            {!!pending.data?.length && (
+              <section className="card p-4">
+                <h2 className="section-title mb-1">Dispensed prescriptions awaiting payment</h2><p className="mb-3 text-sm text-muted">Tick a prescription to add it to this sale.</p>
+                <ul className="space-y-2">{pending.data.map((d) => (
+                  <li key={d.id}><label className={`flex cursor-pointer items-center gap-3 rounded-lg border p-3 text-sm ${billing.includes(d.id) ? "border-primary bg-teal-50" : "border-line"}`}>
+                    <input type="checkbox" checked={billing.includes(d.id)} onChange={(e) => setBilling(e.target.checked ? [...billing, d.id] : billing.filter((x) => x !== d.id))} />
+                    <FileText size={17} aria-hidden className="text-muted" /><span className="flex-1"><strong>{d.prescription}</strong> · {d.patient}<span className="block text-xs text-muted">{d.items.map((i) => `${i.medicine} × ${i.quantity}`).join(", ")}</span></span><span className="font-semibold tabular-nums">≈ {d.estimated_total}</span>
+                  </label></li>))}</ul>
+              </section>)}
+          </div>
+
+          <section aria-label="Cart" className="card flex flex-col xl:sticky xl:top-20">
+            <header className="flex items-center justify-between border-b border-line px-4 py-3"><h2 className="section-title flex items-center gap-2"><ShoppingCart size={18} aria-hidden />Cart</h2><span className="text-sm text-muted">{cart.length + pend.length} item{cart.length + pend.length === 1 ? "" : "s"}</span></header>
+            <div className="max-h-[38vh] space-y-3 overflow-y-auto px-4 py-3">
+              {cart.length === 0 && pend.length === 0 && <p className="py-6 text-center text-sm text-muted">The cart is empty.</p>}
+              {cart.map((l) => (
+                <div key={l.product.id} className="rounded-lg border border-line p-3">
+                  <div className="flex items-start justify-between gap-2"><div><p className="text-sm font-semibold">{l.product.name}</p><p className="text-xs text-muted">{l.product.strength} · {l.product.price} each</p></div>
+                    <button aria-label={`Remove ${l.product.name}`} className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-danger" onClick={() => setCart(cart.filter((x) => x.product.id !== l.product.id))}><Trash2 size={16} /></button></div>
+                  <div className="mt-2 flex items-center gap-3">
+                    <div className="flex items-center rounded-lg border border-line">
+                      <button type="button" aria-label={`Decrease quantity of ${l.product.name}`} className="p-2 hover:bg-slate-100" onClick={() => patchLine(l.product.id, { quantity: Math.max(1, l.quantity - 1) })}><Minus size={14} /></button>
+                      <input aria-label={`Quantity of ${l.product.name}`} type="number" min="1" className="w-14 !min-h-8 !border-0 text-center !shadow-none" value={l.quantity} onChange={(e) => patchLine(l.product.id, { quantity: Math.max(1, Number(e.target.value)) })} />
+                      <button type="button" aria-label={`Increase quantity of ${l.product.name}`} className="p-2 hover:bg-slate-100" onClick={() => patchLine(l.product.id, { quantity: l.quantity + 1 })}><Plus size={14} /></button>
+                    </div>
+                    <label className="flex items-center gap-1 text-xs text-muted">Disc. %<input aria-label={`Discount percent for ${l.product.name}`} type="number" min="0" max="100" className="w-16 !min-h-8 px-2 py-1" value={l.discount_pct} onChange={(e) => patchLine(l.product.id, { discount_pct: Number(e.target.value) })} /></label>
+                    <span className="ml-auto text-sm font-semibold tabular-nums">{money(Number(l.product.price) * l.quantity * (1 - l.discount_pct / 100))}</span>
+                  </div>
+                </div>))}
+              {pend.map((d) => <p key={d.id} className="flex justify-between rounded-lg bg-slate-50 p-3 text-sm"><span>Prescription {d.prescription}</span><span className="font-semibold tabular-nums">≈ {d.estimated_total}</span></p>)}
+            </div>
+            <div className="space-y-3 border-t border-line px-4 py-3">
+              <dl className="space-y-1 text-sm">
+                <div className="flex justify-between"><dt className="text-muted">Subtotal</dt><dd className="tabular-nums">{money(gross + rxTotal)}</dd></div>
+                {discount > 0 && <div className="flex justify-between"><dt className="text-muted">Discount</dt><dd className="tabular-nums text-danger">−{money(discount)}</dd></div>}
+                <div className="flex justify-between"><dt className="text-muted">Tax</dt><dd className="tabular-nums">{money(tax)}</dd></div>
+                <div className="flex items-baseline justify-between border-t border-line pt-2"><dt className="font-semibold">Estimated total</dt><dd className="text-2xl font-bold tabular-nums">{money(est)}</dd></div>
+              </dl>
+              <p className="text-xs text-muted">The final amount is calculated by the server.</p>
+              <input aria-label="Customer name" className="w-full px-3 py-2" placeholder="Customer name (optional)" value={customer} onChange={(e) => setCustomer(e.target.value)} />
+              <div role="radiogroup" aria-label="Payment method" className="grid grid-cols-4 gap-1.5">
+                {METHODS.map(([value, label, Icon]) => <button type="button" role="radio" aria-checked={tender.method === value} key={value} onClick={() => setTender({ ...tender, method: value })}
+                  className={`flex flex-col items-center gap-1 rounded-lg border px-1 py-2 text-[11px] font-semibold leading-tight ${tender.method === value ? "border-primary bg-teal-50 text-teal-800" : "border-line text-slate-600 hover:bg-slate-50"}`}><Icon size={17} aria-hidden />{label}</button>)}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <input aria-label="Amount tendered" type="number" min="0.01" step="0.01" className="min-w-0 flex-1 px-3 py-2" placeholder="Amount tendered" value={tender.amount} onChange={(e) => setTender({ ...tender, amount: e.target.value })} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addPayment(); } }} />
+                {tender.method !== "cash" && <input aria-label="Transaction reference" className="min-w-0 flex-1 px-3 py-2" placeholder="Reference" value={tender.reference} onChange={(e) => setTender({ ...tender, reference: e.target.value })} />}
+                <button type="button" className="btn btn-outline" onClick={addPayment}>Add payment</button>
+              </div>
+              {payments.length > 0 && <ul className="space-y-1 text-sm">{payments.map((p, i) => <li key={i} className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-1.5"><span>{methodLabel(p.method)} {p.reference && <span className="text-xs text-muted">· {p.reference}</span>}</span><span className="flex items-center gap-2"><strong className="tabular-nums">{p.amount}</strong><button aria-label="Remove payment" className="text-slate-400 hover:text-danger" onClick={() => setPayments(payments.filter((_, j) => j !== i))}><Trash2 size={14} /></button></span></li>)}</ul>}
+              <p className="flex justify-between text-sm"><span className="text-muted">Tendered <strong className="text-ink tabular-nums">{money(tendered)}</strong></span><span className="text-muted">Change ≈ <strong className="text-ink tabular-nums">{money(Math.max(0, tendered - est))}</strong></span></p>
+              <button disabled={checkout.isPending || (cart.length === 0 && billing.length === 0)} onClick={() => checkout.mutate()} className="btn btn-primary w-full !min-h-12 !text-base"><CheckCircle2 size={19} aria-hidden />{checkout.isPending ? "Processing…" : "Complete sale"}</button>
+            </div>
           </section>
         </div>)}
 
-      {receipt && <section aria-label="Receipt" className="rounded-xl border bg-white p-4 shadow"><h2 className="font-semibold">Receipt {receipt.receipt_number} · {receipt.reference_number}</h2><p className="text-sm">Total {receipt.total} · Paid {receipt.amount_paid}</p>
-        <div className="mt-2 flex gap-2"><button className="rounded border px-3 py-1" onClick={() => sellRef(receipt)}>Open PDF / print</button><button className="rounded border px-3 py-1" onClick={() => emailReceipt(receipt)}>Email receipt</button><button className="underline" onClick={() => setReceipt(null)}>Close</button></div></section>}
+      {receipt && (
+        <Modal title="Sale completed" onClose={() => setReceipt(null)} footer={<>
+          <button className="btn btn-outline" onClick={() => emailReceipt(receipt)}><Mail size={16} aria-hidden />Email receipt</button>
+          <button className="btn btn-primary" onClick={() => sellRef(receipt)}><Printer size={16} aria-hidden />Open PDF / print</button></>}>
+          <section aria-label="Receipt" className="text-center">
+            <span className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-green-50 text-success"><CheckCircle2 size={30} aria-hidden /></span>
+            <p className="mt-3 text-sm text-muted">Receipt {receipt.receipt_number} · {receipt.reference_number}</p>
+            <p className="mt-1 text-3xl font-bold tabular-nums">{receipt.total}</p><p className="text-sm text-muted">Paid {receipt.amount_paid}</p>
+          </section>
+        </Modal>)}
 
-      <section><h2 className="mb-2 font-semibold">{can("sales.view_branch") ? "Branch sales" : "My sales"}</h2>
-        {history.data?.results.length === 0 && <p className="text-slate-500">No sales yet.</p>}
-        {history.data && history.data.results.length > 0 && <div className="overflow-x-auto rounded-xl bg-white shadow-sm"><table className="w-full text-left text-sm"><thead className="bg-slate-100"><tr><th className="p-3">Reference</th><th>When</th><th>Cashier</th><th>Customer</th><th>Total</th><th>Status</th><th /></tr></thead>
-          <tbody>{history.data.results.map((s) => <tr key={s.id} className="border-t"><td className="p-3">{s.reference_number}</td><td>{new Date(s.created_at).toLocaleString()}</td><td>{s.cashier_name}</td><td>{s.customer_name}</td><td>{s.total}</td><td>{s.status.replace("_", " ")}</td>
-            <td className="space-x-2"><button className="underline" onClick={() => sellRef(s)}>Receipt</button><button className="underline" onClick={() => emailReceipt(s)}>Email</button>
-              {can("sales.refund") && ["completed", "partially_returned"].includes(s.status) && <><button className="underline" onClick={() => refund(s, false)}>Return</button><button className="underline" onClick={() => refund(s, true)}>Cancel</button></>}</td></tr>)}</tbody></table></div>}</section>
+      <section className="space-y-3">
+        <h2 className="section-title">{can("sales.view_branch") ? "Branch sales" : "My sales"}</h2>
+        {history.isLoading && <Loading rows={3} />}
+        {history.data?.results.length === 0 && <EmptyState>No sales yet.</EmptyState>}
+        {history.data && history.data.results.length > 0 && <div className="table-wrap"><table className="table"><thead><tr><th>Reference</th><th>When</th><th>Cashier</th><th>Customer</th><th className="!text-right">Total</th><th>Status</th><th><span className="sr-only">Actions</span></th></tr></thead>
+          <tbody>{history.data.results.map((s) => <tr key={s.id}><td className="font-semibold">{s.reference_number}</td><td>{new Date(s.created_at).toLocaleString()}</td><td>{s.cashier_name}</td><td>{s.customer_name || "—"}</td><td className="text-right font-semibold tabular-nums">{s.total}</td><td><StatusBadge status={s.status} /></td>
+            <td className="whitespace-nowrap text-right"><button className="btn-link" onClick={() => sellRef(s)}>Receipt</button><button className="btn-link" onClick={() => emailReceipt(s)}>Email</button>
+              {can("sales.refund") && ["completed", "partially_returned"].includes(s.status) && <><button className="btn-link" onClick={() => refund(s, false)}>Return</button><button className="btn-link !text-red-700" onClick={() => refund(s, true)}>Cancel</button></>}</td></tr>)}</tbody></table></div>}
+      </section>
     </div>
   );
 }

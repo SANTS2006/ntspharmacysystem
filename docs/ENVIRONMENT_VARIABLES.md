@@ -5,7 +5,7 @@
 | DJANGO_DEBUG | false | Never true in production |
 | DJANGO_SECRET_KEY | dev key only if DEBUG | Required in production, ≥32 chars |
 | DJANGO_ALLOWED_HOSTS | localhost,127.0.0.1 | comma list |
-| PLATFORM_NAME / PLATFORM_BASE_DOMAIN / FRONTEND_URL | PharmaCloud / localhost / http://localhost:5173 | used for links and subdomain resolution |
+| PLATFORM_NAME / PLATFORM_BASE_DOMAIN / FRONTEND_URL | NTS Pharmacy System / localhost / http://localhost:5173 | used for links and subdomain resolution |
 | DATABASE_URL | local SQLite | Neon: `postgresql://user:pass@host/db?sslmode=require` |
 | DB_CONN_MAX_AGE / DB_SSLMODE | 60 / require | Postgres only |
 | REDIS_URL | empty | empty ⇒ in-process cache/channels, Celery eager (dev only) |

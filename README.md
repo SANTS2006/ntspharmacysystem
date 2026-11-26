@@ -1,4 +1,4 @@
-# PharmaCloud — Multi-Tenant Pharmacy Management SaaS
+# NTS Pharmacy System — Multi-Tenant Pharmacy Management SaaS
 
 Django + DRF + PostgreSQL (Neon) backend, React + TypeScript + Tailwind frontend. No Docker.
 Status and roadmap: [IMPLEMENTATION_PROGRESS.md](docs/IMPLEMENTATION_PROGRESS.md).
