@@ -3,6 +3,7 @@ from django.urls import path
 from . import profile_views, views
 
 urlpatterns = [
+    path("google/platform/", views.PlatformGoogleView.as_view()),
     path("login/", views.LoginView.as_view(), name="auth-login"),
     path("refresh/", views.RefreshView.as_view(), name="auth-refresh"),
     path("logout/", views.LogoutView.as_view(), name="auth-logout"),

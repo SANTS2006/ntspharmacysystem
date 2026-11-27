@@ -4,7 +4,7 @@
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
 
-export default function PharmacyScene({ color = "#10b981", color2 = "#38bdf8", className = "" }: { color?: string; color2?: string; className?: string }) {
+export default function PharmacyScene({ color = "#0c6ce4", color2 = "#0c9cfc", className = "", variant = "pharmacy" }: { color?: string; color2?: string; className?: string; variant?: string }) {
   const host = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = host.current;
@@ -75,14 +75,40 @@ export default function PharmacyScene({ color = "#10b981", color2 = "#38bdf8", c
       o.position.set(x, y, z); o.scale.setScalar(scale); o.rotation.set(x * 0.4, y * 0.5, z * 0.3 + x * 0.2);
       world.add(o); items.push({ o, y, speed, phase: items.length * 1.7 });
     };
-    place(cross(), 0.2, 0.2, 0, 1.15, 0.22);
-    place(capsule(a, white), -3.4, 1.7, -0.5, 1.05, 0.5);
-    place(capsule(b, white), 3.5, -1.5, 0.6, 0.95, -0.42);
-    place(capsule(white, a), 2.7, 2.5, -2, 0.75, 0.62);
-    place(tablet(white), -2.8, -2.2, 0.4, 0.95, 0.38);
-    place(tablet(b), 3.9, 0.9, -1.6, 0.7, -0.55);
-    place(molecule(), -0.9, 2.9, -2.4, 0.8, 0.3);
-    place(molecule(), 0.9, -3.0, -1.2, 0.62, -0.34);
+    const helix = () => {
+      const g = new THREE.Group();
+      for (let i = 0; i < 18; i++) {
+        const angle = i * 0.55, y = (i - 8.5) * 0.36;
+        const ends = [new THREE.Vector3(Math.cos(angle) * 1.5, y, Math.sin(angle) * 1.5), new THREE.Vector3(-Math.cos(angle) * 1.5, y, -Math.sin(angle) * 1.5)];
+        ends.forEach((at, side) => { const ball = mesh(new THREE.SphereGeometry(0.24, 24, 16), side ? b : a); ball.position.copy(at); g.add(ball); });
+        const dir = ends[1].clone().sub(ends[0]);
+        const rod = mesh(new THREE.CylinderGeometry(0.05, 0.05, dir.length(), 10), white);
+        rod.position.copy(ends[0]).add(dir.clone().multiplyScalar(0.5));
+        rod.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.normalize());
+        g.add(rod);
+      }
+      return g;
+    };
+    if (variant === "capsules") {
+      [[0, 0.1, 0.5, 1.7], [-3.2, 1.8, -0.8, 1], [3.3, -1.7, 0, 1.1], [2.9, 2.3, -1.8, 0.8], [-2.9, -2.1, -0.6, 0.85]].forEach(([x, y, z, s], i) => place(capsule(i % 2 ? b : a, white), x, y, z, s, (i % 2 ? -1 : 1) * (0.3 + i * 0.07)));
+      place(tablet(white), -3.9, 0, 0.3, 0.7, 0.45); place(tablet(b), 3.9, 0.5, -1.2, 0.65, -0.5);
+    } else if (variant === "molecule") {
+      place(molecule(), 0, 0, 0.5, 1.7, 0.28); place(molecule(), -3.3, 1.9, -1.5, 0.85, -0.35); place(molecule(), 3.3, -1.8, -1, 0.9, 0.4); place(molecule(), 3, 2.3, -2.5, 0.6, -0.3);
+    } else if (variant === "dna") {
+      const strand = helix(); place(strand, 0, 0, 0, 1.05, 0.55); strand.rotation.set(0, 0, 0.35);
+      place(capsule(a, white), -3.6, -1.7, -1, 0.7, 0.4); place(tablet(white), 3.6, 1.8, -1, 0.65, -0.45);
+    } else if (variant === "cross") {
+      place(cross(), 0, 0, 0.3, 1.75, 0.35); place(capsule(b, white), -3.5, 1.7, -1, 0.8, 0.5); place(capsule(white, a), 3.5, -1.6, -0.6, 0.8, -0.45); place(tablet(b), -3, -2, 0, 0.6, 0.4); place(molecule(), 3, 2.2, -2, 0.65, -0.3);
+    } else {
+      place(cross(), 0.2, 0.2, 0, 1.15, 0.22);
+      place(capsule(a, white), -3.4, 1.7, -0.5, 1.05, 0.5);
+      place(capsule(b, white), 3.5, -1.5, 0.6, 0.95, -0.42);
+      place(capsule(white, a), 2.7, 2.5, -2, 0.75, 0.62);
+      place(tablet(white), -2.8, -2.2, 0.4, 0.95, 0.38);
+      place(tablet(b), 3.9, 0.9, -1.6, 0.7, -0.55);
+      place(molecule(), -0.9, 2.9, -2.4, 0.8, 0.3);
+      place(molecule(), 0.9, -3.0, -1.2, 0.62, -0.34);
+    }
     const dotsGeo = keep(new THREE.BufferGeometry());
     dotsGeo.setAttribute("position", new THREE.Float32BufferAttribute(Array.from({ length: 360 }, (_, i) => (Math.sin(i * 12.9898) * 43758.5453 % 1) * (i % 3 === 2 ? 5 : 9)), 3));
     world.add(new THREE.Points(dotsGeo, keep(new THREE.PointsMaterial({ color: new THREE.Color(color2), size: 0.05, transparent: true, opacity: 0.7 }))));
@@ -129,6 +155,6 @@ export default function PharmacyScene({ color = "#10b981", color2 = "#38bdf8", c
       renderer.forceContextLoss();
       renderer.domElement.remove();
     };
-  }, [color, color2]);
+  }, [color, color2, variant]);
   return <div ref={host} aria-hidden className={`pointer-events-none [&>canvas]:!h-full [&>canvas]:!w-full ${className}`} />;
 }

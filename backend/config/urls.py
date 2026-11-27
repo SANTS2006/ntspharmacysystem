@@ -36,6 +36,7 @@ urlpatterns = [
     path("api/v1/", include("apps.billing.tenant_urls")),
     path("robots.txt", seo.robots_txt),
     path("sitemap.xml", seo.sitemap_xml),
+    path("api/v1/", include("apps.website.urls")),
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
     path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema"), name="docs"),
 ]

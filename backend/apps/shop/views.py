@@ -78,7 +78,7 @@ class PublicCategoriesView(PublicBase):
 class PublicBranchesView(PublicBase):
     def get(self, request, slug):
         with tenant_context(_tenant(slug)):
-            return Response(list(Branch.objects.filter(status="active").values("id", "name", "address", "phone", "email", "operating_hours")))
+            return Response(list(Branch.objects.filter(status="active").values("id", "name", "address", "phone", "email", "operating_hours", "latitude", "longitude")))
 
 
 class PublicMenuView(PublicBase):

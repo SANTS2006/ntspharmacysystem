@@ -2,7 +2,7 @@
 import { createContext, useContext, type CSSProperties, type ReactNode } from "react";
 
 export interface Brand { name: string; logo: string | null; color: string; color2: string }
-export const PLATFORM_BRAND: Brand = { name: "NTS Pharmacy System", logo: "/logo.webp", color: "#047857", color2: "#142d3d" };
+export const PLATFORM_BRAND: Brand = { name: "NTS Pharmacy System", logo: "/logo.webp", color: "#0c54cc", color2: "#0c3c9c" };
 
 const Ctx = createContext<Brand>(PLATFORM_BRAND);
 export const useBrand = () => useContext(Ctx);

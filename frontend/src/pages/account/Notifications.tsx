@@ -8,7 +8,7 @@ import { api } from "../../lib/api";
 import { ago, dateTime, words } from "../../lib/format";
 import { NOTE_TONES, noteIcon, useNoteActions, type Note, type NotePage } from "../../lib/notifications";
 
-const KINDS = ["order", "payment", "inventory", "prescription", "delivery", "appointment", "inquiry", "customer", "cash", "payroll", "billing", "backup", "security", "account"];
+const KINDS = ["order", "payment", "inventory", "prescription", "delivery", "appointment", "inquiry", "contact", "customer", "cash", "payroll", "billing", "backup", "security", "account"];
 const PAGE = 12;
 
 export function NotificationsPage({ base }: { base: string }) {

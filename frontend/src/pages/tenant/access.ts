@@ -26,6 +26,8 @@ export const MODULE_ACCESS = {
   branches: any("branch.view"),
   "pharmacy-settings": any("settings.manage"),
   subscription: any("settings.manage"),
+  website: any("settings.manage"),
+  "website-contact": any("engagement.manage"),
 } satisfies Record<string, (u: User) => boolean>;
 
 export type Module = keyof typeof MODULE_ACCESS;

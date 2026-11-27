@@ -91,6 +91,24 @@ class LoginView(TenantContextMixin, APIView):
                          "user": UserSerializer(user).data})
 
 
+class PlatformGoogleView(APIView):
+    """Google sign-in for EXISTING platform administrators only. It never creates an account or reaches a pharmacy account."""
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    throttle_scope = "login"
+
+    def get_throttles(self):
+        from rest_framework.throttling import ScopedRateThrottle
+        return [ScopedRateThrottle()]
+
+    def post(self, request):
+        try:
+            user = services.google_platform_login(str(request.data.get("id_token", "")), request)
+        except services.AuthError as e:
+            return error(e.code, e.message, e.status)
+        return Response({"success": True, "tokens": services.issue_tokens(user), "user": UserSerializer(user).data})
+
+
 class RefreshView(APIView):
     permission_classes = [AllowAny]
     authentication_classes = []

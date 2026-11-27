@@ -36,7 +36,7 @@ function Hero({ brand, title, message, home, links, showLogo, children }: { bran
             <Link to={home.to} className="btn btn-primary !min-h-12 !px-7"><HomeIcon size={17} aria-hidden />{home.label}</Link>
             <BackButton className="btn glass !min-h-12 !px-7 text-white" />
           </div>
-          <nav aria-label="Helpful pages" className="mt-8 flex flex-wrap justify-center gap-x-5 gap-y-2 text-sm lg:justify-start">{links.map(([to, label]) => <Link key={to} to={to} className="font-semibold text-white/80 underline-offset-4 hover:text-white hover:underline">{label}</Link>)}</nav>
+          <nav aria-label="Helpful pages" className="mt-8 flex flex-wrap justify-center gap-x-5 gap-y-2 text-sm lg:justify-start">{links.map(([to, label]) => <Link key={to} to={to} className="font-semibold text-white/80 hover:text-white">{label}</Link>)}</nav>
           {children}
         </div>
       </div>

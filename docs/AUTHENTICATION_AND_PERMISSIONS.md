@@ -25,3 +25,7 @@ Branch-scoped roles (`branch_scoped` and user has a branch) must filter queryset
 
 ## Not yet implemented
 Google OAuth, customer registration + 6-character email verification, device/session listing, password reset by email (Phase 2/8).
+
+## Google sign-in for the platform admin
+
+The platform sign-in page shows a Google button when `GOOGLE_OAUTH_CLIENT_ID` is set. It only signs in an **existing, active** platform admin whose email matches the verified Google account; it never creates accounts. In Google Cloud, create an OAuth *Web application* client and add the site's address (and `http://localhost:5173` for development) as an authorised JavaScript origin. Tested with a mocked verifier only, not yet against real Google.

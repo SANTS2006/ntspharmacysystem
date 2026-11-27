@@ -52,6 +52,9 @@ const cust = () => import("./pages/tenant/CustomersPage");
 const CustomersPage = lazy(cust), CustomerDetailPage = named(cust, "CustomerDetailPage");
 const SubscriptionPage = lazy(() => import("./pages/tenant/SubscriptionPage"));
 
+const WebsiteBuilder = lazy(() => import("./pages/website/WebsiteBuilder"));
+const WebsiteMessages = lazy(() => import("./pages/website/WebsiteMessages"));
+
 const portal = () => import("./pages/customer/CustomerPortal");
 const CustomerLayout = lazy(portal);
 const CustomerDashboard = named(portal, "CustomerDashboard"), MyOrders = named(portal, "MyOrders"), CustomerOrderDetail = named(portal, "CustomerOrderDetail"), MyPayments = named(portal, "MyPayments"), CustomerCare = named(portal, "CustomerCare");
@@ -59,6 +62,7 @@ const CustomerDashboard = named(portal, "CustomerDashboard"), MyOrders = named(p
 const SiteLayout = lazy(() => import("./pages/site/SiteLayout"));
 const sp = () => import("./pages/site/SitePages");
 const SiteNotFoundPage = named(() => import("./pages/site/SiteLayout"), "SiteNotFoundPage");
+const SiteAbout = named(sp, "SiteAbout"), SiteContact = named(sp, "SiteContact");
 const SiteHome = named(sp, "SiteHome"), Products = named(sp, "Products"), Checkout = named(sp, "Checkout"), QrMenu = named(sp, "QrMenu");
 const xp = () => import("./pages/site/SiteExtras");
 const ServicesPage = named(xp, "ServicesPage"), InstitutionalPage = named(xp, "InstitutionalPage");
@@ -125,6 +129,8 @@ export default function App() {
           <Route path="customers/:customerId" element={<CustomerDetailPage />} />
           <Route path="pharmacy-settings" element={<PharmacySettings />} />
           <Route path="subscription" element={<SubscriptionPage />} />
+          <Route path="website" element={<WebsiteBuilder />} />
+          <Route path="website-contact" element={<WebsiteMessages />} />
           <Route path="settings" element={<AccountSettings />} />
           <Route path="notifications" element={<Notes area="admin" />} />
           <Route path="notifications/:noteId" element={<NoteDetail area="admin" />} />
@@ -146,6 +152,8 @@ export default function App() {
 
         <Route path="/:slug" element={<SiteLayout />}>
           <Route index element={<SiteHome />} />
+          <Route path="about" element={<SiteAbout />} />
+          <Route path="contact" element={<SiteContact />} />
           <Route path="products" element={<Products />} />
           <Route path="checkout" element={<Checkout />} />
           <Route path="services" element={<ServicesPage />} />
@@ -165,6 +173,8 @@ export default function App() {
           <Route path="billing" element={<Billing />} />
           <Route path="audit" element={<AuditLog />} />
           <Route path="backups" element={<Backups />} />
+          <Route path="website" element={<WebsiteBuilder />} />
+          <Route path="website-contact" element={<WebsiteMessages />} />
           <Route path="settings" element={<AccountSettings />} />
           <Route path="notifications" element={<Notes area="platform" />} />
           <Route path="notifications/:noteId" element={<NoteDetail area="platform" />} />

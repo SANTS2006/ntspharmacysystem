@@ -1,21 +1,21 @@
 /** A pharmacy's public website: home, products, checkout and the in-branch QR menu. */
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { ArrowRight, CalendarClock, Check, Clock, FileCheck2, MapPin, Minus, PackageSearch, Phone, Pill, Plus, Search, ShoppingCart, Smartphone, Trash2, Truck } from "lucide-react";
+import { Check, FileCheck2, Minus, Pill, Plus, Search, ShoppingCart, Trash2 } from "lucide-react";
 import { useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { Reveal, Tilt, useSeo } from "../../components/site/motion";
-import { Scene3D } from "../../components/three/Scene3D";
+import { PageView } from "../../components/site/blocks";
+import { Tilt, useSeo } from "../../components/site/motion";
 import { EmptyState, Loading, Pagination, Spinner, errorMessage, placeholderFor, useConfirm, useToast } from "../../components/ui";
 import { api } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
 import { useCart } from "../../lib/cart";
 import { money } from "../../lib/format";
+import { PHARMACY_PAGES, contactOf, pharmacyDefault, useGlobalContent, useSavedPage, type PageContent } from "../../lib/pages";
 import { useSite } from "./SiteLayout";
 
 interface Page<T> { count: number; next: string | null; previous: string | null; results: T[] }
 interface Med { id: number; name: string; strength: string; dosage_form: string; category: string; price: string; description: string; requires_prescription: boolean; available?: boolean; image?: string | null }
 interface Branch { id: number; name: string; address: string; phone: string }
-interface Svc { id: number; name: string; description: string; price: string | null; duration_minutes: number; requires_booking: boolean }
 
 function ProductCard({ m, onAdd }: { m: Med; onAdd: () => void }) {
   return (
@@ -39,66 +39,36 @@ function useAdd(slug: string) {
   return (m: Med) => { cart.add({ id: m.id, name: m.name, price: m.price, requires_prescription: m.requires_prescription }); toast(`${m.name} added to your cart.`); };
 }
 
-// ---------------- home ----------------
-export function SiteHome() {
-  const { slug = "" } = useParams(); const s = useSite(); const add = useAdd(slug);
-  const branches = useQuery({ queryKey: ["branches-public", slug], queryFn: () => api<Branch[]>(`/public/pharmacies/${slug}/branches/`) });
-  const featured = useQuery({ queryKey: ["catalogue", slug, "", "", 1], queryFn: () => api<Page<Med>>(`/public/pharmacies/${slug}/catalogue/?page=1&search=`) });
-  const services = useQuery({ queryKey: ["pub-services", slug], queryFn: () => api<Svc[]>(`/public/pharmacies/${slug}/services/`) });
-  useSeo(`${s?.name ?? "Pharmacy"} | Online pharmacy`, (s?.description || `${s?.name} is an online pharmacy. Browse medicines, book services and order online.`).slice(0, 160), {
-    image: s?.logo,
-    jsonLd: s ? { "@context": "https://schema.org", "@type": "Pharmacy", name: s.name, description: s.description || undefined, url: `${location.origin}/${slug}`, logo: s.logo || undefined, image: s.logo || undefined, telephone: s.contact_phone || undefined, email: s.contact_email || undefined, address: { "@type": "PostalAddress", streetAddress: s.address || undefined, addressLocality: s.city || undefined, addressCountry: s.country || undefined } } : undefined,
+// ---------------- builder pages ----------------
+/** A pharmacy page from the website builder; `children` (a catalogue or a form) sits between the hero and the added sections. */
+export function BuilderPage({ pageKey, children }: { pageKey: string; children?: React.ReactNode }) {
+  const { slug = "" } = useParams(); const s = useSite()!;
+  const saved = useSavedPage<PageContent>(pageKey, slug);
+  const global = useGlobalContent(slug);
+  const content = saved.data?.content ?? pharmacyDefault(pageKey, s);
+  const label = PHARMACY_PAGES.find(([k]) => k === pageKey)?.[1] ?? "Online pharmacy";
+  useSeo(`${s.name} | ${pageKey === "home" ? "Online pharmacy" : label}`, (content.hero.subtitle || s.description || `${s.name}, online pharmacy.`).replace(/\*\*/g, "").slice(0, 160), {
+    image: s.logo,
+    jsonLd: pageKey === "home" ? { "@context": "https://schema.org", "@type": "Pharmacy", name: s.name, description: s.description || undefined, url: `${location.origin}/${slug}`, logo: s.logo || undefined, telephone: s.contact_phone || undefined, email: s.contact_email || undefined, address: { "@type": "PostalAddress", streetAddress: s.address || undefined, addressLocality: s.city || undefined, addressCountry: s.country || undefined } } : undefined,
   });
-  const perks = [[PackageSearch, "Order online", "Browse our catalogue and order in a few taps."], [FileCheck2, "Pharmacist checked", "Prescription medicines are reviewed before they are supplied."], [Smartphone, s?.online_payments ? "Mobile money" : "Easy payment", s?.online_payments ? "Pay securely online with mobile money." : "Pay when you collect or on delivery."], [Truck, "Pickup or delivery", "Collect from a branch or have it brought to you."]] as const;
-  return (
-    <>
-      <section className="hero-surface relative overflow-hidden">
-        <Scene3D color={s?.primary_color} color2={s?.secondary_color} className="absolute inset-0 opacity-25 lg:left-[48%] lg:opacity-100" />
-        <div className="site-wrap relative grid min-h-[32rem] items-center py-16 lg:min-h-[38rem]">
-          <div className="animate-rise max-w-2xl">
-            {s?.city && <p className="glass inline-flex items-center gap-2 rounded-full px-4 py-1.5 text-xs font-bold"><MapPin size={14} aria-hidden />{[s.city, s.country].filter(Boolean).join(", ")}</p>}
-            <h1 className="mt-5 text-4xl font-extrabold leading-[1.1] tracking-tight sm:text-5xl xl:text-6xl">{s?.name}</h1>
-            <p className="mt-5 max-w-xl text-lg leading-8 text-white/85">{s?.description || "Your trusted local pharmacy: medicines, advice and services, online and in store."}</p>
-            <div className="mt-8 flex flex-wrap gap-3">
-              <Link to={`/${slug}/products`} className="btn btn-primary !min-h-12 !px-7">Shop medicines<ArrowRight size={17} aria-hidden /></Link>
-              <Link to={`/${slug}/services`} className="btn glass !min-h-12 !px-7 text-white"><CalendarClock size={17} aria-hidden />Our services</Link>
-            </div>
-          </div>
-        </div>
-      </section>
-      <div className="site-wrap space-y-16 py-12 md:space-y-24 md:py-16">
-        <section aria-label="Why choose us" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          {perks.map(([I, t, d], i) => <Reveal key={t} delay={i * 80} className="h-full"><div className="card card-hover h-full p-6"><span className="grid h-12 w-12 place-items-center rounded-2xl" style={{ background: "linear-gradient(135deg, var(--brand), var(--brand-2))", color: "#fff" }}><I size={22} aria-hidden /></span><h2 className="mt-4 section-title">{t}</h2><p className="mt-1.5 text-sm text-muted">{d}</p></div></Reveal>)}
-        </section>
-        {!!featured.data?.results.length && <section>
-          <Reveal className="mb-6 flex flex-wrap items-end justify-between gap-3"><div><h2 className="text-2xl !font-extrabold md:text-3xl">Popular products</h2><p className="text-muted">A selection from our shelves.</p></div><Link className="btn btn-outline" to={`/${slug}/products`}>View all<ArrowRight size={16} aria-hidden /></Link></Reveal>
-          <ul className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">{featured.data.results.slice(0, 8).map((m, i) => <Reveal as="li" key={m.id} delay={(i % 4) * 80}><ProductCard m={m} onAdd={() => add(m)} /></Reveal>)}</ul>
-        </section>}
-        {!!services.data?.length && <section>
-          <Reveal><h2 className="mb-6 text-2xl !font-extrabold md:text-3xl">Services we offer</h2></Reveal>
-          <ul className="grid gap-5 md:grid-cols-3">{services.data.slice(0, 6).map((v, i) => <Reveal as="li" key={v.id} from={i % 3 === 0 ? "left" : i % 3 === 2 ? "right" : "up"}><div className="card card-hover h-full p-6"><h3 className="section-title">{v.name}</h3><p className="mt-2 line-clamp-3 text-sm text-muted">{v.description}</p><p className="mt-4 flex items-center gap-2 text-sm font-semibold"><Clock size={15} aria-hidden />{v.duration_minutes} min{v.price && ` · from ${money(v.price)}`}</p></div></Reveal>)}</ul>
-        </section>}
-        <section>
-          <Reveal><h2 className="mb-6 text-2xl !font-extrabold md:text-3xl">Visit our branches</h2></Reveal>
-          {branches.isLoading && <Loading rows={2} />}
-          <ul className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">{branches.data?.map((b, i) => <Reveal as="li" key={b.id} delay={(i % 3) * 90}><div className="card card-hover h-full p-6 text-sm"><p className="section-title">{b.name}</p><p className="mt-3 flex gap-2 text-muted"><MapPin size={16} aria-hidden className="mt-0.5 shrink-0" />{b.address || "Address not listed"}</p>{b.phone && <a href={`tel:${b.phone}`} className="mt-2 flex gap-2 text-muted hover:underline"><Phone size={16} aria-hidden className="mt-0.5 shrink-0" />{b.phone}</a>}</div></Reveal>)}</ul>
-        </section>
-      </div>
-    </>
-  );
+  if (saved.isLoading) return <div className="site-wrap py-8"><Loading /></div>;
+  return <PageView content={content} info={{ slug, name: s.name, contact: contactOf(s, global), colors: [s.primary_color, s.secondary_color] }}>{children}</PageView>;
 }
+export const SiteHome = () => <BuilderPage key="home" pageKey="home" />;
+export const SiteAbout = () => <BuilderPage key="about" pageKey="about" />;
+export const SiteContact = () => <BuilderPage key="contact" pageKey="contact" />;
 
 // ---------------- products ----------------
-export function Products() {
-  const { slug = "" } = useParams(); const s = useSite(); const add = useAdd(slug);
+export const Products = () => <BuilderPage key="products" pageKey="products"><Catalogue /></BuilderPage>;
+
+function Catalogue() {
+  const { slug = "" } = useParams(); const add = useAdd(slug);
   const [q, setQ] = useState(""); const [cat, setCat] = useState(""); const [page, setPage] = useState(1);
-  useSeo(`Medicines and health products | ${s?.name}`, `Browse medicines and health products available from ${s?.name} and order online.`, { image: s?.logo });
   const cats = useQuery({ queryKey: ["cats", slug], queryFn: () => api<{ id: number; name: string }[]>(`/public/pharmacies/${slug}/categories/`) });
   const list = useQuery({ queryKey: ["catalogue", slug, q, cat, page], queryFn: () => api<Page<Med>>(`/public/pharmacies/${slug}/catalogue/?page=${page}&search=${encodeURIComponent(q)}${cat ? `&category=${cat}` : ""}`), placeholderData: (p) => p });
   const chip = (id: string, label: string) => <button key={id} type="button" aria-pressed={cat === id} onClick={() => { setCat(id); setPage(1); }} className={`btn btn-sm !rounded-full ${cat === id ? "btn-primary" : "btn-outline"}`}>{label}</button>;
   return (
     <div className="site-wrap space-y-6 py-8">
-      <div><h1 className="text-3xl !font-extrabold">Products</h1><p className="text-muted">Search our catalogue and add medicines to your cart.</p></div>
       <div className="card space-y-3 p-4">
         <span className="relative block"><Search size={18} aria-hidden className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" /><input type="search" aria-label="Search products" placeholder="Enter your medicine name" className="w-full !min-h-12 !pl-11" value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} /></span>
         <div role="group" aria-label="Category" className="flex flex-wrap gap-2">{chip("", "All")}{cats.data?.map((c) => chip(String(c.id), c.name))}</div>

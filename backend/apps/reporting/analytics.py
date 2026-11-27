@@ -257,5 +257,5 @@ def platform(days: int) -> dict:
         "subscriptions": [{"label": r["plan__name"], "value": r["n"]} for r in Subscription.objects.values("plan__name").annotate(n=Count("id")).order_by("-n")],
         "invoices": [{"label": r["status"], "value": r["n"], "amount": r["t"]} for r in Invoice.objects.values("status").annotate(n=Count("id"), t=Sum("amount"))],
         "emails": _counts(EmailLog.objects.filter(created_at__date__gte=start)),
-        "last_backup": None if not last_backup else {"number": last_backup.number, "created_at": last_backup.created_at, "verification": last_backup.verification},
+        "last_backup": None if not last_backup else {"number": last_backup.number, "created_at": last_backup.started_at, "verification": last_backup.verification},
     }

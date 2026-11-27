@@ -29,7 +29,7 @@ def _rgb(color: str):
     try:
         return tuple(int(color[i:i + 2], 16) for i in (1, 3, 5))
     except (ValueError, IndexError):
-        return (5, 150, 105)
+        return (12, 84, 204)
 
 
 def on_color(color: str) -> str:
@@ -135,7 +135,7 @@ def layout(*, brand, tagline, logo, color, color2, title, eyebrow, body, prehead
 
 
 def render_platform_html(*, title, paragraphs, button=None, code="", details=None, items=None, preheader="", eyebrow="Account notification") -> str:
-    color, color2 = "#059669", "#142d3d"
+    color, color2 = "#0c54cc", "#0c3c9c"
     return layout(brand=settings.PLATFORM_NAME, tagline="Pharmacy management, made simple", logo=absolute("/favicon.png"), color=color, color2=color2,
                   title=title, eyebrow=eyebrow, preheader=preheader or (paragraphs[0] if paragraphs else title),
                   body=body_html(paragraphs=paragraphs, color=color, code=code, details=details, items=items, button=button),

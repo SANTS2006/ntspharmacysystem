@@ -99,6 +99,21 @@ def authenticate(email: str, password: str, tenant, request=None) -> User:
     return user
 
 
+def google_platform_login(id_token: str, request=None) -> User:
+    from apps.shop.services import verify_google_id_token
+    info = verify_google_id_token(id_token)  # checks audience, issuer and that Google verified the address
+    email = str(info.get("email", "")).lower()
+    user = User.objects.filter(tenant__isnull=True, is_platform_admin=True, email=email).first()
+    if user is None or not user.is_active:
+        _log(email, None, user, False, "google_not_admin", request)
+        raise AuthError("google_not_allowed", "This Google account is not a platform administrator.", 403)
+    if user.is_locked:
+        raise AuthError("account_locked", "Too many failed attempts. Try again later.", 429)
+    _log(email, None, user, True, "google", request)
+    audit.record("auth.google_login", actor=user, tenant=None, request=request)
+    return user
+
+
 def _register_failure(user, request):
     user.failed_login_count += 1
     if user.failed_login_count >= settings.LOGIN_MAX_FAILED_ATTEMPTS:

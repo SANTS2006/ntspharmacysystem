@@ -33,7 +33,7 @@ export default function OrdersPage() {
       <Tabs tabs={[["orders", "Orders"], ["requests", "QR requests"]]} value={tab} onChange={setTab} />
       {tab === "orders" && <ServerTable<OrderRow> queryKey={["staff-orders"]} path="/orders/" rowKey={(o) => o.id} search="Enter your order or customer search" empty="No orders." refetchInterval={30000}
         onRowClick={(o) => nav(`/${slug}/admin/orders/${o.id}`)} filters={[{ name: "status", label: "All statuses", options: ALL.map((s) => [s, words(s)]) }]}
-        columns={[{ key: "ref", header: "Order", render: (o) => <><Link className="font-bold text-primary hover:underline" to={`/${slug}/admin/orders/${o.id}`}>{o.reference_number}</Link><span className="block text-xs text-muted">{dateTime(o.created_at)}</span></> },
+        columns={[{ key: "ref", header: "Order", render: (o) => <><Link className="font-bold text-primary" to={`/${slug}/admin/orders/${o.id}`}>{o.reference_number}</Link><span className="block text-xs text-muted">{dateTime(o.created_at)}</span></> },
           { key: "customer", header: "Customer", render: (o) => <><b className="block">{o.customer_name}</b><span className="text-xs text-muted">{o.customer_phone}</span></> },
           { key: "branch", header: "Branch", render: (o) => o.branch_name }, { key: "fulfilment", header: "Fulfilment", render: (o) => <span className="capitalize">{o.fulfilment}</span> },
           { key: "payment", header: "Payment", render: (o) => <span className="capitalize">{methodName(o.payment_method)}</span> }, { key: "status", header: "Status", render: (o) => <StatusBadge status={o.status} /> },

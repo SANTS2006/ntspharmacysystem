@@ -58,7 +58,7 @@ function OrdersTable({ rows, base, loading }: { rows?: OrderRow[]; base: string;
   const nav = useNavigate();
   return <DataTable rows={rows} loading={loading} pageSize={20} rowKey={(o) => o.id} onRowClick={(o) => nav(`${base}/orders/${o.id}`)} empty="You have not placed any orders yet."
     columns={[
-      { key: "ref", header: "Order", render: (o) => <Link className="font-bold text-primary hover:underline" to={`${base}/orders/${o.id}`}>{o.reference_number}</Link> },
+      { key: "ref", header: "Order", render: (o) => <Link className="font-bold text-primary" to={`${base}/orders/${o.id}`}>{o.reference_number}</Link> },
       { key: "date", header: "Placed", render: (o) => dateTime(o.created_at), sort: (o) => o.created_at },
       { key: "items", header: "Items", render: (o) => o.lines.reduce((t, l) => t + l.quantity, 0), align: "center" },
       { key: "fulfilment", header: "Fulfilment", render: (o) => <span className="capitalize">{o.fulfilment}</span> },
@@ -83,7 +83,7 @@ export function CustomerDashboard() {
           <Link to={`${base}/care`} className="btn glass text-white"><CalendarClock size={16} aria-hidden />Book a service</Link>
         </div>
       </section>
-      {s.awaiting_payment > 0 && <p className="alert alert-warning"><Wallet size={18} aria-hidden />You have {s.awaiting_payment} order{s.awaiting_payment > 1 ? "s" : ""} waiting for mobile money payment. <Link className="font-bold underline" to={`${base}/orders`}>Pay now</Link></p>}
+      {s.awaiting_payment > 0 && <p className="alert alert-warning"><Wallet size={18} aria-hidden />You have {s.awaiting_payment} order{s.awaiting_payment > 1 ? "s" : ""} waiting for mobile money payment. <Link className="font-bold" to={`${base}/orders`}>Pay now</Link></p>}
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard label="My orders" value={s.orders} icon={Package} to={`${base}/orders`} />
         <StatCard label="In progress" value={s.open_orders} icon={RefreshCw} tone="info" />

@@ -40,7 +40,7 @@ INSTALLED_APPS = [
     "apps.tenants",
     "apps.accounts",
     "apps.audit",
-    "apps.notifications",
+    "apps.notifications", "apps.website",
     "apps.billing",
     "apps.medicines",
     "apps.inventory",
@@ -209,8 +209,11 @@ WHITENOISE_ADD_HEADERS_FUNCTION = _whitenoise_headers
 WHITENOISE_MAX_AGE = 31536000 if not DEBUG else 0  # Vite fingerprints asset names
 ADMIN_ENABLED = env.bool("DJANGO_ADMIN_ENABLED", default=DEBUG)  # the Django admin is not used by the product: off in production unless enabled
 # CSP for the single-page app: scripts only from this origin; images may come from Cloudinary; API + WebSocket on this origin.
-SPA_CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://res.cloudinary.com; "
-           "font-src 'self' data:; connect-src 'self' wss: ws://localhost:* ws://127.0.0.1:*; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'")
+SECURE_CROSS_ORIGIN_OPENER_POLICY = "same-origin-allow-popups"
+# Google is allowed only for platform-admin sign-in and for the branch maps.
+SPA_CSP = ("default-src 'self'; script-src 'self' https://accounts.google.com/gsi/client; style-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/style; "
+           "frame-src https://www.google.com https://maps.google.com https://accounts.google.com; img-src 'self' data: blob: https://res.cloudinary.com; "
+           "font-src 'self' data:; connect-src 'self' wss: ws://localhost:* ws://127.0.0.1:* https://accounts.google.com/gsi/; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'")
 
 # --- Email: console in dev; Brevo backend is added in Phase 2 ---
 EMAIL_BACKEND = env("EMAIL_BACKEND", default="django.core.mail.backends.console.EmailBackend")

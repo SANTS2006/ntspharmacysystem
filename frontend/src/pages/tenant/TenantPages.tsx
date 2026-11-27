@@ -2,18 +2,19 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Building2, Check, ImageUp, Pencil, Plus, Power, QrCode, ShieldCheck, Users } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Avatar, ColorPicker, ErrorState, FormModal, Loading, Modal, PageHeader, Spinner, StatusBadge, errorMessage, placeholderFor, useConfirm, useToast, type FieldDef } from "../../components/ui";
+import { Avatar, ColorPicker, ErrorState, FormModal, Loading, Modal, PageHeader, Spinner, StatusBadge, errorMessage, placeholderFor, useConfirm, useToast, type FieldDef, parsePoint } from "../../components/ui";
 import { ServerTable, type ApiPage } from "../../components/ui/ServerTable";
 import { api, openProtectedFile } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
 
 // ---------------- Branches ----------------
-export interface Branch { id: number; name: string; code: string; address: string; phone: string; email: string; status: string; manager: number | null }
+export interface Branch { latitude?: string | null; longitude?: string | null; id: number; name: string; code: string; address: string; phone: string; email: string; status: string; manager: number | null }
 
 const branchFields = (b?: Branch): FieldDef[] => [
   { name: "name", label: "Branch name", defaultValue: b?.name, maxLength: 150 }, { name: "code", label: "Branch code", defaultValue: b?.code, maxLength: 20 },
   { name: "address", label: "Branch address", defaultValue: b?.address, required: false, wide: true },
   { name: "phone", label: "Branch phone", type: "tel", defaultValue: b?.phone, required: false }, { name: "email", label: "Branch email", type: "email", defaultValue: b?.email, required: false },
+  { name: "location", label: "Map location (shown on your website)", type: "location", defaultValue: b?.latitude && b?.longitude ? `${b.latitude}, ${b.longitude}` : "", required: false },
 ];
 
 export function Branches() {
@@ -42,7 +43,10 @@ export function Branches() {
           </span> },
         ]} />
       {editing && <FormModal title={editing === "new" ? "Add branch" : `Edit ${editing.name}`} fields={branchFields(editing === "new" ? undefined : editing)} onClose={() => setEditing(null)} submitLabel={editing === "new" ? "Add branch" : "Save changes"}
-        onSubmit={async (v) => { await api(editing === "new" ? "/branches/" : `/branches/${editing.id}/`, { method: editing === "new" ? "POST" : "PATCH", body: v }); done(editing === "new" ? "Branch added." : "Branch updated."); }} />}
+        onSubmit={async ({ location: spot, ...v }) => {
+          const point = parsePoint(spot ?? "");
+          if (spot?.trim() && !point) throw new Error("Enter the map location as latitude, longitude. For example 8.484000, -13.229900.");
+          await api(editing === "new" ? "/branches/" : `/branches/${editing.id}/`, { method: editing === "new" ? "POST" : "PATCH", body: { ...v, latitude: point?.[0] ?? null, longitude: point?.[1] ?? null } }); done(editing === "new" ? "Branch added." : "Branch updated."); }} />}
     </div>
   );
 }
@@ -173,9 +177,9 @@ export function SettingsPage() {
             <label className="field-label sm:col-span-2">Description<textarea rows={4} className="mt-1.5 w-full" placeholder={placeholderFor("Pharmacy description")} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></label>
           </div></section>
           <section className="card p-6"><h2 className="section-title">Brand colours</h2><div className="mt-4 grid gap-4 lg:grid-cols-2">
-            <ColorPicker label="Primary color" value={form.primary_color} logo={logo} onChange={(v) => setForm({ ...form, primary_color: v })} />
-            <ColorPicker label="Secondary color" value={form.secondary_color} logo={logo} onChange={(v) => setForm({ ...form, secondary_color: v })} />
-          </div>{!logo && <p className="mt-3 text-xs text-muted">Tip: choose a new logo file to pick colours straight from it.</p>}</section>
+            <ColorPicker label="Primary color" value={form.primary_color} onChange={(v) => setForm({ ...form, primary_color: v })} />
+            <ColorPicker label="Secondary color" value={form.secondary_color} onChange={(v) => setForm({ ...form, secondary_color: v })} />
+          </div></section>
         </div>
         <aside className="space-y-5">
           <section className="card p-6 text-center"><h2 className="section-title">Logo</h2>

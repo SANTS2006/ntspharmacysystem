@@ -31,21 +31,8 @@ export function Tilt({ children, className = "", max = 7 }: { children: ReactNod
   return <div ref={ref} onPointerMove={move} onPointerLeave={() => { if (ref.current) ref.current.style.transform = ""; }} className={`tilt ${className}`}>{children}</div>;
 }
 
-export function ScrollProgress() {
-  const ref = useRef<HTMLDivElement>(null);
-  const { pathname } = useLocation();
-  useEffect(() => {
-    const update = () => { const max = document.documentElement.scrollHeight - window.innerHeight; if (ref.current) ref.current.style.transform = `scaleX(${max > 0 ? Math.min(1, window.scrollY / max) : 0})`; };
-    update();
-    window.addEventListener("scroll", update, { passive: true });
-    window.addEventListener("resize", update);
-    return () => { window.removeEventListener("scroll", update); window.removeEventListener("resize", update); };
-  }, [pathname]);
-  return <div ref={ref} className="scroll-progress" aria-hidden />;
-}
-
 /** Slide-in menu for small screens; links arrive one after another. */
-export function MobileMenu({ title, children }: { title: ReactNode; children: ReactNode[] }) {
+export function MobileMenu({ title, children, wide }: { title: ReactNode; children: ReactNode[]; wide?: boolean }) {
   const [open, setOpen] = useState(false);
   const { pathname } = useLocation();
   useEffect(() => setOpen(false), [pathname]);
@@ -58,9 +45,9 @@ export function MobileMenu({ title, children }: { title: ReactNode; children: Re
   }, [open]);
   return (
     <>
-      <button type="button" className="icon-btn !text-current lg:hidden" aria-expanded={open} aria-label="Open menu" onClick={() => setOpen(true)}><Menu size={22} /></button>
+      <button type="button" className={`icon-btn !text-current ${wide ? "xl:hidden" : "lg:hidden"}`} aria-expanded={open} aria-label="Open menu" onClick={() => setOpen(true)}><Menu size={22} /></button>
       {createPortal(
-        <div className={`fixed inset-0 z-[70] overflow-hidden lg:hidden ${open ? "" : "pointer-events-none"}`}>
+        <div className={`fixed inset-0 z-[70] overflow-hidden ${wide ? "xl:hidden" : "lg:hidden"} ${open ? "" : "pointer-events-none"}`}>
           <div className={`backdrop absolute inset-0 transition-opacity duration-300 ${open ? "opacity-100" : "opacity-0"}`} onClick={() => setOpen(false)} />
           <div role="dialog" aria-modal="true" aria-label="Menu" className={`drawer absolute inset-y-0 right-0 flex w-[min(20rem,86vw)] flex-col bg-white text-ink shadow-pop ${open ? "drawer-open" : ""}`}>
             <div className="flex items-center justify-between gap-3 border-b border-line p-4"><div className="min-w-0 font-bold">{title}</div><button type="button" aria-label="Close menu" className="icon-btn" onClick={() => setOpen(false)}><X size={20} /></button></div>

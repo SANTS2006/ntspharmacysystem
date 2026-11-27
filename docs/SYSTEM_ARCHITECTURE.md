@@ -32,3 +32,11 @@ Within each future app: `models.py`, `selectors.py` (reads), `services.py` (writ
 
 ## Roadmap
 Phases 1–14 as in the project brief. See IMPLEMENTATION_PROGRESS.md for status.
+
+## Website builder, website contact and maps
+
+- `apps/website` stores saved pages (`SitePage`) and contact form messages (`ContactMessage`). A null tenant means the main website.
+- Content is cleaned on the server (`content.py`): fixed section types, layouts, animations and 3D models, size limits and safe links only. The only text formatting is `**bold**`, bullet lines and paragraphs; no HTML is rendered.
+- Until a page is saved, the website shows the starting content in `frontend/src/lib/pages.ts`.
+- **Website content** is available to the platform admin (`/platform/website`) and to pharmacy staff with `settings.manage`. **Website contact** needs `engagement.manage` for pharmacy staff.
+- Maps are Google Maps embeds with a directions link. They use a branch's coordinates when set, otherwise its written address. A searched address can be less accurate than coordinates.

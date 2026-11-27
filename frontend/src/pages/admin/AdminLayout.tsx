@@ -1,4 +1,4 @@
-import { DatabaseBackup, LayoutDashboard, Receipt, ScrollText, Store } from "lucide-react";
+import { DatabaseBackup, Globe, Inbox, LayoutDashboard, Receipt, ScrollText, Store } from "lucide-react";
 import { Navigate, Outlet, useParams } from "react-router-dom";
 import { PLATFORM_BRAND, PageLoader } from "../../components/brand/Brand";
 import { AppShell, type NavGroup } from "../../components/layout/AppShell";
@@ -10,6 +10,9 @@ const groups: NavGroup[] = [
   { label: "Tenants", items: [
     { to: "/platform/pharmacies", label: "Pharmacies", icon: Store, keywords: "register tenants" },
     { to: "/platform/billing", label: "Billing", icon: Receipt, keywords: "invoices plans revenue" }] },
+  { label: "Website", items: [
+    { to: "/platform/website", label: "Website content", icon: Globe, keywords: "website builder pages hero footer" },
+    { to: "/platform/website-contact", label: "Website contact", icon: Inbox, keywords: "contact form messages enquiries" }] },
   { label: "System", items: [
     { to: "/platform/audit", label: "Audit log", icon: ScrollText },
     { to: "/platform/backups", label: "Backups", icon: DatabaseBackup, keywords: "restore" }] },

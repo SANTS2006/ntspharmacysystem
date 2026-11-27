@@ -14,7 +14,8 @@ class PlatformInfoView(APIView):
 
     def get(self, request):
         return Response({"name": settings.PLATFORM_NAME, "whatsapp_number": settings.PLATFORM_WHATSAPP_NUMBER,
-                         "contact_email": settings.PLATFORM_CONTACT_EMAIL})
+                         "contact_email": settings.PLATFORM_CONTACT_EMAIL,
+                         "google_client_id": settings.GOOGLE_OAUTH_CLIENT_ID})  # a client id is public by design
 
 
 def _online_payments(pharmacy) -> bool:

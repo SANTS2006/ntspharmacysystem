@@ -5,7 +5,7 @@ import { api } from "./api";
 export interface Note { id: number; kind: string; level: "info" | "success" | "warning" | "danger"; title: string; body: string; link: string; read: boolean; read_at: string | null; created_at: string }
 export interface NotePage { count: number; next: string | null; previous: string | null; unread: number; results: Note[] }
 
-const ICONS: Record<string, LucideIcon> = { order: Package, payment: CreditCard, inventory: Boxes, prescription: ScrollText, delivery: Truck, appointment: CalendarClock, inquiry: MessageSquare, customer: UserPlus, security: ShieldAlert, billing: Receipt, backup: DatabaseBackup, cash: Wallet, payroll: Banknote };
+const ICONS: Record<string, LucideIcon> = { order: Package, payment: CreditCard, inventory: Boxes, prescription: ScrollText, delivery: Truck, appointment: CalendarClock, inquiry: MessageSquare, contact: MessageSquare, customer: UserPlus, security: ShieldAlert, billing: Receipt, backup: DatabaseBackup, cash: Wallet, payroll: Banknote };
 export const noteIcon = (kind: string) => ICONS[kind] ?? Bell;
 export const NOTE_TONES: Record<Note["level"], string> = { info: "bg-sky-50 text-sky-700", success: "bg-emerald-50 text-emerald-700", warning: "bg-amber-50 text-amber-700", danger: "bg-red-50 text-red-700" };
 

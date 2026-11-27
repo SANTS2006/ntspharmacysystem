@@ -50,5 +50,5 @@ class SecurityHeadersMiddleware:
             response.headers.setdefault("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'; base-uri 'none'")
         elif not request.path.startswith(("/admin/", "/api/docs/")):
             response.headers.setdefault("Content-Security-Policy", settings.SPA_CSP)
-        response.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
+        response.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin-allow-popups")
         return response

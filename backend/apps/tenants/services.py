@@ -63,6 +63,43 @@ def register_pharmacy(*, actor, admin_full_name, admin_email, admin_phone="", us
 
 
 @transaction.atomic
+def update_administrator(pharmacy: Pharmacy, *, actor, request=None, admin_full_name=None, admin_email=None, admin_phone=None, use_invitation=False):
+    """Edit the pharmacy's first administrator. Changing the sign-in address ends that account's sessions."""
+    from rest_framework.exceptions import ValidationError
+    admin = User.objects.filter(tenant=pharmacy, role__code="pharmacy_admin").order_by("date_joined", "pk").first()
+    if admin is None:
+        raise ValidationError({"admin_email": "This pharmacy has no administrator account."})
+    changed = []
+    if admin_full_name and admin_full_name != admin.full_name:
+        admin.full_name = admin_full_name
+        changed.append("full_name")
+    if admin_phone is not None and admin_phone != admin.phone:
+        admin.phone = admin_phone
+        changed.append("phone")
+    email = (admin_email or "").strip().lower()
+    email_changed = bool(email) and email != admin.email
+    if email_changed:
+        if User.objects.filter(tenant=pharmacy, email=email).exclude(pk=admin.pk).exists():
+            raise ValidationError({"admin_email": "Another account in this pharmacy already uses this email."})
+        old, admin.email = admin.email, email
+        admin.credential_version += 1
+        changed += ["email", "credential_version"]
+    if changed:
+        admin.save(update_fields=changed)
+        audit.record("platform.administrator_updated", actor=actor, tenant=pharmacy, target=admin, request=request, fields=sorted(changed))
+    if email_changed:
+        send_email(to=old, subject="Your administrator email was changed", tenant=pharmacy, template="email_change_notice",
+                   text=f"The sign-in email for the {pharmacy.name} administrator was changed to {email} by the platform team. Contact them if this is unexpected.")
+    if use_invitation:
+        link = f"{settings.FRONTEND_URL.rstrip('/')}/accept-invitation?token={account_services.create_invitation(admin)}"
+        send_email(to=admin.email, subject=f"Set your {pharmacy.name} password", tenant=pharmacy, template="admin_onboarding",
+                   text=f"Use this one-time link to set your password: {link}",
+                   html_body=render_branded_html(title="Set your password", pharmacy=pharmacy, button=("Set my password", link),
+                                                 paragraphs=["The platform team sent you a new one-time link to set your password."]))
+    return admin
+
+
+@transaction.atomic
 def set_status(pharmacy: Pharmacy, status: str, *, actor, reason="", request=None) -> Pharmacy:
     previous = pharmacy.status
     pharmacy.status, pharmacy.status_reason = status, reason

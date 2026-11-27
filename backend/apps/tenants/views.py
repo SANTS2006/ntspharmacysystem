@@ -4,7 +4,10 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from django.shortcuts import get_object_or_404
 
+from django.db import transaction
+
 from apps.accounts.permissions import IsPlatformAdmin
+from apps.audit import services as audit_service
 
 from . import services
 from .models import RESERVED_SLUGS, Pharmacy
@@ -56,11 +59,29 @@ class PharmacyListCreateView(ListCreateAPIView):
         return Response(PharmacySerializer(pharmacy).data, status=status.HTTP_201_CREATED)
 
 
+class AdministratorEdit(serializers.Serializer):
+    admin_full_name = serializers.CharField(max_length=200, required=False)
+    admin_email = serializers.EmailField(required=False)
+    admin_phone = serializers.CharField(max_length=30, required=False, allow_blank=True)
+    use_invitation = serializers.BooleanField(required=False, default=False)
+
+
 class PharmacyDetailView(RetrieveUpdateAPIView):
     permission_classes = [IsPlatformAdmin]
     queryset = Pharmacy.objects.all()
     serializer_class = PharmacySerializer
     http_method_names = ["get", "patch", "head", "options"]
+
+    @transaction.atomic
+    def perform_update(self, serializer):
+        admin = AdministratorEdit(data=self.request.data)
+        admin.is_valid(raise_exception=True)
+        sent = {k: v for k, v in admin.validated_data.items() if k in self.request.data}
+        pharmacy = serializer.save()
+        audit_service.record("platform.pharmacy_updated", actor=self.request.user, tenant=pharmacy, target=pharmacy, request=self.request,
+                             fields=sorted(serializer.validated_data))
+        if sent:
+            services.update_administrator(pharmacy, actor=self.request.user, request=self.request, **sent)
 
 
 class PharmacyStatusView(APIView):

@@ -7,6 +7,8 @@ import { useForm } from "react-hook-form";
 import { Link, Navigate, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { z } from "zod";
 import { AuthShell, Field, Notice, PasswordRules, SubmitButton } from "../../components/auth/AuthUi";
+import { GoogleButton } from "../../components/auth/GoogleButton";
+import { usePlatformInfo } from "../../components/PublicLayout";
 import { PageLoader, type Brand } from "../../components/brand/Brand";
 import { SystemNotFound } from "../../components/NotFound";
 import { ErrorState, errorMessage } from "../../components/ui";
@@ -15,7 +17,7 @@ import { useAuth } from "../../lib/auth";
 import { PHARMACY_POINTS, brandOf, homeFor, useSiteQuery, type Site } from "../../lib/site";
 
 const strong = z.string().min(10, "Use at least 10 characters.").regex(/[A-Za-z]/, "Include a letter.").regex(/\d/, "Include a number.");
-const link = "font-bold text-primary hover:underline";
+const link = "font-bold text-primary";
 
 /** Loads the pharmacy's identity first so its sign-in pages never flash the platform brand. */
 function Branded({ slug, children }: { slug?: string; children: (v: { brand: Brand | undefined; site?: Site; extra: Record<string, unknown> }) => ReactNode }) {
@@ -37,6 +39,14 @@ export function LoginPage() {
   const nav = useNavigate();
   const { user, loading, setUser } = useAuth();
   const [error, setError] = useState<string | null>(null);
+  const platform = usePlatformInfo();
+  const googleSignIn = async (idToken: string) => {
+    setError(null);
+    try {
+      const r = await api<{ tokens: { access: string; refresh: string } }>("/auth/google/platform/", { method: "POST", body: { id_token: idToken }, retry: false });
+      setTokens(r.tokens); const u = await fetchMe(); setUser(u); go(u);
+    } catch (e) { setError(errorMessage(e)); }
+  };
   const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<{ email: string; password: string }>({ resolver: zodResolver(z.object({ email: z.string().email("Enter a valid email address."), password: z.string().min(1, "Enter your password.") })) });
   const go = (u: User) => {
     const next = safeNext(sp.get("next"), u.tenant_slug ?? undefined);
@@ -58,6 +68,7 @@ export function LoginPage() {
           <Field label="Password" icon={Lock} type="password" autoComplete="current-password" placeholder="Enter your password" error={errors.password?.message} {...register("password")} />
           <SubmitButton busy={isSubmitting} icon={LogIn}>{isSubmitting ? "Signing in…" : "Sign in"}</SubmitButton>
         </form>
+        {!slug && platform.data?.google_client_id && <div className="mt-5 space-y-4"><p className="flex items-center gap-3 text-xs text-muted"><span className="h-px flex-1 bg-slate-200" />or<span className="h-px flex-1 bg-slate-200" /></p><GoogleButton clientId={platform.data.google_client_id} onToken={googleSignIn} /></div>}
       </AuthShell>)}
     </Branded>
   );

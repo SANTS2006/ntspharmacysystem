@@ -27,7 +27,7 @@ export async function api<T>(path: string, opts: { method?: string; body?: unkno
   if (res.status === 401 && access && opts.retry !== false && (await refresh(opts.tenant))) return api<T>(path, { ...opts, retry: false });
   if (res.status === 204) return undefined as T;
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new ApiError(res.status, data?.error?.code ?? "error", data?.error?.message ?? "Request failed.", data?.error?.details);
+  if (!res.ok) throw new ApiError(res.status, data?.error?.code ?? "error", data?.error?.message ?? (res.status >= 500 ? `The server hit a problem (error ${res.status}). Please try again.` : `Request failed (error ${res.status}).`), data?.error?.details);
   return data as T;
 }
 async function refresh(tenant?: string | null): Promise<boolean> {

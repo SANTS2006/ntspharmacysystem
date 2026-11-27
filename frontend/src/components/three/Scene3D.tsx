@@ -9,6 +9,6 @@ class Quiet extends Component<{ children: ReactNode }, { failed: boolean }> {
   render() { return this.state.failed ? null : this.props.children; }
 }
 
-export function Scene3D(props: { color?: string; color2?: string; className?: string }) {
+export function Scene3D(props: { color?: string; color2?: string; className?: string; variant?: string }) {
   return <Quiet><Suspense fallback={null}><PharmacyScene {...props} /></Suspense></Quiet>;
 }
