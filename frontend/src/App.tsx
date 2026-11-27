@@ -1,6 +1,7 @@
 import { lazy, Suspense, type ComponentType } from "react";
 import { Navigate, Route, Routes, useLocation, useParams } from "react-router-dom";
 import { PageLoader } from "./components/brand/Brand";
+import { ShellNotFound, SystemNotFound } from "./components/NotFound";
 import { Home } from "./pages/public/PublicPages";
 
 /** Lazy-load one named export of a module, so each area is downloaded only when it is opened. */
@@ -57,6 +58,7 @@ const CustomerDashboard = named(portal, "CustomerDashboard"), MyOrders = named(p
 
 const SiteLayout = lazy(() => import("./pages/site/SiteLayout"));
 const sp = () => import("./pages/site/SitePages");
+const SiteNotFoundPage = named(() => import("./pages/site/SiteLayout"), "SiteNotFoundPage");
 const SiteHome = named(sp, "SiteHome"), Products = named(sp, "Products"), Checkout = named(sp, "Checkout"), QrMenu = named(sp, "QrMenu");
 const xp = () => import("./pages/site/SiteExtras");
 const ServicesPage = named(xp, "ServicesPage"), InstitutionalPage = named(xp, "InstitutionalPage");
@@ -126,6 +128,7 @@ export default function App() {
           <Route path="settings" element={<AccountSettings />} />
           <Route path="notifications" element={<Notes area="admin" />} />
           <Route path="notifications/:noteId" element={<NoteDetail area="admin" />} />
+          <Route path="*" element={<ShellNotFound area="admin" />} />
         </Route>
 
         <Route path="/:slug/account" element={<CustomerLayout />}>
@@ -138,6 +141,7 @@ export default function App() {
           <Route path="settings" element={<AccountSettings />} />
           <Route path="notifications" element={<Notes area="account" />} />
           <Route path="notifications/:noteId" element={<NoteDetail area="account" />} />
+          <Route path="*" element={<ShellNotFound area="account" />} />
         </Route>
 
         <Route path="/:slug" element={<SiteLayout />}>
@@ -150,6 +154,7 @@ export default function App() {
           <Route path="orders" element={<Moved to="/:slug/account/orders" />} />
           <Route path="orders/:id" element={<Moved to="/:slug/account/orders/:id" />} />
           <Route path="feedback" element={<Moved to="/:slug/account/care" />} />
+          <Route path="*" element={<SiteNotFoundPage />} />
         </Route>
 
         <Route path="/platform" element={<AdminLayout />}>
@@ -163,7 +168,9 @@ export default function App() {
           <Route path="settings" element={<AccountSettings />} />
           <Route path="notifications" element={<Notes area="platform" />} />
           <Route path="notifications/:noteId" element={<NoteDetail area="platform" />} />
+          <Route path="*" element={<ShellNotFound area="platform" />} />
         </Route>
+        <Route path="*" element={<SystemNotFound />} />
       </Routes>
     </Suspense>
   );

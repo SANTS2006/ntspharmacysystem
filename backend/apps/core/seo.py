@@ -19,6 +19,30 @@ MARKETING = {
 SITE_PAGES = {"": "Online pharmacy", "products": "Medicines and health products", "services": "Pharmacy services", "institutional": "Bulk and institutional orders"}
 
 
+LEGAL = "privacy|terms|payment-refund|data-protection|security|cookies"
+SYSTEM_ROUTES = re.compile(
+    rf"^(?:|features|solutions|pricing|about|faq|contact|support|legal/(?:{LEGAL})|reset-password|accept-invitation|change-password|dashboard"
+    r"|platform/(?:login|forgot-password)|platform(?:/(?:dashboard|pharmacies(?:/\d+)?|billing|audit|backups|settings|notifications(?:/\d+)?))?)$")
+# Mirrors frontend/src/App.tsx: add new pharmacy pages here too, or they are served with status 404.
+PHARMACY_ROUTES = re.compile(
+    r"^(?:|products|checkout|services|institutional|feedback|orders(?:/\d+)?|menu/[^/]+|login|register|verify|forgot-password"
+    r"|admin(?:/(?:login|forgot-password|dashboard|overview|branches|staff|roles|medicines|inventory|procurement|prescriptions(?:/\d+)?|pos"
+    r"|orders(?:/\d+)?|payments|accounting|hr|payroll|my-work|reports|engagement|deliveries|customers(?:/\d+)?|pharmacy-settings|subscription"
+    r"|settings|notifications(?:/\d+)?))?"
+    r"|account(?:/(?:dashboard|orders(?:/\d+)?|payments|care|settings|notifications(?:/\d+)?))?)$")
+
+
+def is_known_route(path: str) -> bool:
+    clean = path.strip("/")
+    if SYSTEM_ROUTES.match(clean):
+        return True
+    from apps.tenants.models import RESERVED_SLUGS, Pharmacy
+    slug, _, rest = clean.partition("/")
+    if slug in RESERVED_SLUGS or not PHARMACY_ROUTES.match(rest):
+        return False
+    return Pharmacy.objects.filter(slug=slug, status=Pharmacy.Status.ACTIVE).exists()
+
+
 def base_url(request) -> str:
     configured = (settings.FRONTEND_URL or "").rstrip("/")
     return configured if configured.startswith("https://") else f"{request.scheme}://{request.get_host()}"

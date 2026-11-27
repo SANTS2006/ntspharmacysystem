@@ -21,8 +21,8 @@ BARCODE_RE = re.compile(r"^[A-Za-z0-9-]{6,32}$")
 class CategorySerializer(serializers.ModelSerializer):
     class Meta:
         model = Category
-        fields = ["id", "name", "is_system"]
-        read_only_fields = ["id", "is_system"]
+        fields = ["id", "name"]
+        read_only_fields = ["id"]
 
     def validate_name(self, value):
         value = value.strip()
@@ -162,12 +162,7 @@ class CategoryDetailView(TenantContextMixin, RetrieveUpdateDestroyAPIView):
     def get_queryset(self):
         return Category.objects.all()
 
-    def perform_update(self, serializer):
-        if serializer.instance.is_system:
-            raise ValidationError({"detail": "Default categories cannot be renamed."})
-        serializer.save()
-
     def perform_destroy(self, instance):
-        if instance.is_system or instance.medicines.exists():
-            raise ValidationError({"detail": "Only unused custom categories can be deleted."})
+        if instance.medicines.exists():
+            raise ValidationError({"detail": "A category with medicines in it cannot be deleted."})
         instance.delete()

@@ -3,16 +3,8 @@ from django.db import models
 from apps.core.models import TenantOwnedModel
 from apps.tenants.models import validate_logo  # same image rules as logos (no SVG, size cap)
 
-DEFAULT_CATEGORIES = [
-    "Prescription medicines", "Over-the-counter medicines", "Antibiotics", "Analgesics", "Antimalarials",
-    "Antihypertensives", "Antidiabetics", "Vitamins and supplements", "First aid products", "Medical equipment",
-    "Medical consumables", "Personal care products", "Baby care products", "Healthcare products",
-]
-
-
 class Category(TenantOwnedModel):
     name = models.CharField(max_length=100)
-    is_system = models.BooleanField(default=False)  # seeded defaults; custom categories are is_system=False
 
     class Meta(TenantOwnedModel.Meta):
         constraints = [models.UniqueConstraint(fields=["tenant", "name"], name="uniq_category_name_per_tenant")]

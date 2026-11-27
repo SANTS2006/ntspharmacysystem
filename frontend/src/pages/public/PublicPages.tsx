@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ArrowRight, BarChart3, Boxes, Building2, Check, ChevronDown, FileText, Globe, Mail, MessageCircle, Receipt, ShieldCheck, Smartphone, Users, type LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
+import { SystemNotFound } from "../../components/NotFound";
 import { PublicLayout, usePageMeta, usePlatformInfo } from "../../components/PublicLayout";
 import { Reveal, Tilt } from "../../components/site/motion";
 import { Scene3D } from "../../components/three/Scene3D";
@@ -168,7 +169,7 @@ export function Contact({ support = false }: { support?: boolean }) {
 export function Legal() {
   const { doc = "" } = useParams();
   const d = legalDocs[doc];
-  if (!d) return <Page title="Not found" desc="Page not found."><p>This document does not exist.</p></Page>;
+  if (!d) return <SystemNotFound />;
   return (
     <Page title={d.title} desc={`${d.title} for the NTS Pharmacy System platform.`}>
       <p className="alert alert-warning mb-6">Draft template pending legal review.</p>

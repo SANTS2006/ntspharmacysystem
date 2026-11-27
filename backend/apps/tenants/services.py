@@ -23,8 +23,6 @@ def register_pharmacy(*, actor, admin_full_name, admin_email, admin_phone="", us
     pharmacy = Pharmacy.objects.create(status=Pharmacy.Status.ACTIVE, **pharmacy_fields)
     roles = account_services.seed_default_roles(pharmacy)
     with tenant_context(pharmacy):
-        from apps.medicines.services import seed_default_categories
-        seed_default_categories()
         Branch.objects.create(name="Main Branch", code="MAIN", address=pharmacy.address,
                               phone=pharmacy.contact_phone, email=pharmacy.contact_email)
     admin = User.objects.create_user(

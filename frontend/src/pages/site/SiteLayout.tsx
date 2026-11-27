@@ -2,9 +2,12 @@ import { LayoutDashboard, LogOut, Mail, MapPin, Phone, ShoppingCart, UserRound }
 import { createContext, Suspense, useContext, useEffect, type CSSProperties } from "react";
 import { Link, NavLink, Outlet, useLocation, useParams } from "react-router-dom";
 import { Loading, PageLoader, BrandProvider } from "../../components/brand/Brand";
+import { SiteNotFound, SystemNotFound } from "../../components/NotFound";
 import { ThemeToggle } from "../../components/layout/AppShell";
 import { PageBoundary } from "../../components/ui/PageBoundary";
 import { MobileMenu, ScrollProgress } from "../../components/site/motion";
+import { ErrorState } from "../../components/ui";
+import { ApiError } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
 import { useCart } from "../../lib/cart";
 import { readableOn } from "../../lib/format";
@@ -14,6 +17,12 @@ import { brandOf, homeFor, useSiteQuery, type Site } from "../../lib/site";
 export type { Site };
 const SiteCtx = createContext<Site | null>(null);
 export const useSite = () => useContext(SiteCtx);
+
+/** Any unknown address under a pharmacy keeps the pharmacy's own header, colours and footer. */
+export function SiteNotFoundPage() {
+  const site = useSite();
+  return site ? <SiteNotFound site={site} /> : null;
+}
 
 /** Each pharmacy's public website: branding comes from the API (name, logo, colours). */
 export default function SiteLayout() {
@@ -33,10 +42,8 @@ export default function SiteLayout() {
   }, [color, color2]);
   useEffect(() => { window.scrollTo(0, 0); }, [pathname]);
   if (q.isLoading) return <PageLoader label="Opening the pharmacy…" />;
-  if (q.isError || !q.data) return (
-    <main className="grid min-h-screen place-items-center p-6">
-      <div className="card max-w-md p-8 text-center"><img src="/logo.webp" alt="" className="mx-auto h-14 w-14" /><h1 className="page-title mt-4">Pharmacy not found</h1><p className="mt-2 text-sm text-muted">This pharmacy website is not available.</p><Link to="/" className="btn btn-primary mt-5">Go to NTS Pharmacy System</Link></div>
-    </main>);
+  if (q.error instanceof ApiError && q.error.status === 404) return <SystemNotFound />; // no such pharmacy
+  if (!q.data) return <main className="grid min-h-screen place-items-center p-6"><div className="w-full max-w-md"><ErrorState onRetry={() => q.refetch()}>This pharmacy could not be loaded. Check your connection.</ErrorState></div></main>;
   const s = q.data;
   const brand = brandOf(s);
   const customer = mine && user.role === "customer";

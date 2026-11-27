@@ -33,7 +33,7 @@ def env(two_pharmacies):
     admin_b = api("bluecross", settled_token("bluecross", "a@blue.test", f"BCP@{y}"))
     with tenant_context(g):
         main, second = Branch.objects.get(code="MAIN"), Branch.objects.create(name="Second", code="B2")
-        cat = Category.objects.get(name="Antibiotics")
+        cat, _ = Category.objects.get_or_create(name="Antibiotics")
         amox = Medicine.objects.create(name="Amoxicillin 500mg", active_ingredient="amoxicillin", category=cat, classification="prescription", registration_number="R1", purchase_price=1, selling_price=2)
         ibu = Medicine.objects.create(name="Ibuprofen 400mg", active_ingredient="ibuprofen", category=cat, purchase_price=1, selling_price=2, contraindications="Avoid in pregnancy and peptic ulcer.")
         warf = Medicine.objects.create(name="Warfarin 5mg", active_ingredient="warfarin", category=cat, classification="prescription", registration_number="R2", purchase_price=1, selling_price=2)

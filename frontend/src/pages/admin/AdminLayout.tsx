@@ -1,7 +1,8 @@
 import { DatabaseBackup, LayoutDashboard, Receipt, ScrollText, Store } from "lucide-react";
-import { Navigate, Outlet } from "react-router-dom";
+import { Navigate, Outlet, useParams } from "react-router-dom";
 import { PLATFORM_BRAND, PageLoader } from "../../components/brand/Brand";
 import { AppShell, type NavGroup } from "../../components/layout/AppShell";
+import { SystemNotFound } from "../../components/NotFound";
 import { useAuth } from "../../lib/auth";
 
 const groups: NavGroup[] = [
@@ -17,7 +18,9 @@ const groups: NavGroup[] = [
 /** UI guard only. Every API call is independently authorised by the backend. */
 export default function AdminLayout() {
   const { user, loading } = useAuth();
+  const unknown = useParams()["*"] !== undefined; // only the catch-all route sets this
   if (loading) return <PageLoader label="Opening platform administration…" />;
+  if (unknown && (!user || !user.is_platform_admin)) return <SystemNotFound />;
   if (!user || !user.is_platform_admin) return <Navigate to="/platform/login" replace />;
   if (user.must_change_password) return <Navigate to="/change-password" replace />;
   return (

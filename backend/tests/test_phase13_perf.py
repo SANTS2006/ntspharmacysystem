@@ -12,7 +12,7 @@ pytestmark = pytest.mark.django_db(transaction=True)
 def test_list_endpoints_do_not_grow_queries_with_row_count(env, django_assert_max_num_queries):
     """Guards against N+1 regressions: query counts for list pages must stay flat as data grows."""
     with tenant_context(env["g"]):
-        cat = Category.objects.get(name="Antibiotics")
+        cat, _ = Category.objects.get_or_create(name="Antibiotics")
         meds = [Medicine.objects.create(name=f"Med {i}", category=cat, purchase_price=1, selling_price=2) for i in range(25)]
     for m in meds[:12]:
         stock(env, m, 20, f"B{m.pk}")

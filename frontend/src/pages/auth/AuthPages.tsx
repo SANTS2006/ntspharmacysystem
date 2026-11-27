@@ -8,8 +8,9 @@ import { Link, Navigate, useLocation, useNavigate, useParams, useSearchParams } 
 import { z } from "zod";
 import { AuthShell, Field, Notice, PasswordRules, SubmitButton } from "../../components/auth/AuthUi";
 import { PageLoader, type Brand } from "../../components/brand/Brand";
-import { errorMessage } from "../../components/ui";
-import { api, changePassword, fetchMe, login, setTokens, type User } from "../../lib/api";
+import { SystemNotFound } from "../../components/NotFound";
+import { ErrorState, errorMessage } from "../../components/ui";
+import { ApiError, api, changePassword, fetchMe, login, setTokens, type User } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
 import { PHARMACY_POINTS, brandOf, homeFor, useSiteQuery, type Site } from "../../lib/site";
 
@@ -20,8 +21,8 @@ const link = "font-bold text-primary hover:underline";
 function Branded({ slug, children }: { slug?: string; children: (v: { brand: Brand | undefined; site?: Site; extra: Record<string, unknown> }) => ReactNode }) {
   const q = useSiteQuery(slug);
   if (slug && q.isLoading) return <PageLoader label="Opening your pharmacy…" />;
-  if (slug && !q.data) return (
-    <main className="grid min-h-screen place-items-center p-6"><div className="card max-w-md p-8 text-center"><img src="/logo.webp" alt="" className="mx-auto h-14 w-14" /><h1 className="page-title mt-4">Pharmacy not found</h1><p className="mt-2 text-sm text-muted">This pharmacy is not available.</p><Link to="/" className="btn btn-primary mt-5">Go to NTS Pharmacy System</Link></div></main>);
+  if (slug && q.error instanceof ApiError && q.error.status === 404) return <SystemNotFound />;
+  if (slug && !q.data) return <main className="grid min-h-screen place-items-center p-6"><div className="w-full max-w-md"><ErrorState onRetry={() => q.refetch()}>This pharmacy could not be loaded. Check your connection.</ErrorState></div></main>;
   const s = q.data;
   const extra = s ? { headline: `Welcome to ${s.name}.`, blurb: s.description || "One secure sign-in for our team and our customers.", points: PHARMACY_POINTS, back: { to: `/${s.slug}`, label: "Back to website" } } : { back: { to: "/", label: "Home" } };
   return <>{children({ brand: s ? brandOf(s) : undefined, site: s, extra })}</>;

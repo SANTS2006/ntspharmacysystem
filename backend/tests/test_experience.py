@@ -168,3 +168,37 @@ def test_public_pages_get_server_side_seo_and_private_pages_are_not_indexed(env,
     assert "Disallow: /*/admin" in robots and "Sitemap:" in robots
     sitemap = seo.sitemap_xml(rf.get("/sitemap.xml")).content.decode()
     assert "/greenlife/products" in sitemap and "/admin" not in sitemap
+
+
+def test_unknown_addresses_answer_404_and_every_app_route_is_known(env, client, settings, tmp_path):
+    import re
+    from pathlib import Path
+
+    from apps.core import seo
+    (tmp_path / "index.html").write_text('<html><head><meta name="description" content="x" /><title>x</title></head></html>', encoding="utf-8")
+    settings.FRONTEND_DIST = tmp_path
+    for good in ("/", "/pricing", "/legal/terms", "/platform/login", "/platform/pharmacies/3", "/greenlife", "/greenlife/products", "/greenlife/login",
+                 "/greenlife/admin/orders/9", "/greenlife/account/care", "/greenlife/menu/abc123"):
+        assert client.get(good).status_code == 200, good
+    for bad in ("/nothing-here", "/legal/unknown", "/platform/nope", "/greenlife/nope", "/greenlife/admin/nope", "/greenlife/account/orders/1/extra",
+                "/no-such-pharmacy/products", "/features/extra", "/missing.png"):
+        r = client.get(bad)
+        assert r.status_code == 404 and b"noindex" in r.content, bad
+
+    app = (Path(__file__).resolve().parents[2] / "frontend" / "src" / "App.tsx").read_text(encoding="utf-8")
+    parent, checked = "", 0
+    for line in app.splitlines():
+        m = re.search(r'<Route (?:index|path="([^"]*)")', line)
+        if line.strip() == "</Route>":
+            parent = ""
+        if not m or m.group(1) in (None, "*"):
+            continue
+        path = m.group(1)
+        if not path.startswith("/"):
+            path = f"{parent}/{path}"
+        elif not line.rstrip().endswith("/>"):
+            parent = path
+        sample = path.replace(":slug", "greenlife").replace(":doc", "terms").replace(":token", "abc").replace(":noteId", "1").replace(":customerId", "1").replace(":orderId", "1").replace(":rxId", "1").replace(":id", "1")
+        assert seo.is_known_route(sample), f"the server does not know the app route {path}"
+        checked += 1
+    assert checked > 60

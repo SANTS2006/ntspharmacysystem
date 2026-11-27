@@ -5,9 +5,10 @@ import { useEffect, useState } from "react";
 import { Link, Navigate, Outlet, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ChartCard, DonutChart, TrendChart, itemsTable } from "../../components/charts";
 import { PageLoader } from "../../components/brand/Brand";
+import { PharmacyNotFound, SystemNotFound } from "../../components/NotFound";
 import { AppShell, type NavGroup } from "../../components/layout/AppShell";
 import { DataTable, EmptyState, ErrorState, FormModal, Loading, PageHeader, Pagination, StatCard, StatusBadge, TableLoader, Tabs, errorMessage, useConfirm, useToast } from "../../components/ui";
-import { api, openProtectedFile } from "../../lib/api";
+import { ApiError, api, openProtectedFile } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
 import { useCart } from "../../lib/cart";
 import { dateTime, day, money, words } from "../../lib/format";
@@ -19,12 +20,16 @@ interface Page<T> { count: number; next: string | null; previous: string | null;
 interface Summary { currency: string; orders: number; open_orders: number; awaiting_payment: number; spent: string; monthly: { month: string; spent: string }[]; by_status: { label: string; value: number }[]; recent: OrderRow[]; appointments: { id: number; service: string; start_at: string; status: string }[] }
 
 export default function CustomerLayout() {
-  const { slug = "" } = useParams();
+  const params = useParams();
+  const slug = params.slug ?? "";
+  const unknown = params["*"] !== undefined; // only the catch-all route sets this
   const { user, loading } = useAuth();
   const site = useSiteQuery(slug);
   const cart = useCart(slug);
   const { pathname, search } = useLocation();
   if (loading || site.isLoading) return <PageLoader label="Opening your account…" brand={brandOf(site.data)} />;
+  if (site.error instanceof ApiError && site.error.status === 404) return <SystemNotFound />;
+  if (unknown && (!user || user.tenant_slug !== slug || user.role !== "customer" || !user.email_verified)) return <PharmacyNotFound />;
   if (!user || user.tenant_slug !== slug) return <Navigate to={`/${slug}/login?next=${encodeURIComponent(pathname + search)}`} replace />;
   if (user.role !== "customer") return <Navigate to={`/${slug}/admin/dashboard`} replace />;
   if (!user.email_verified) return <Navigate to={`/${slug}/verify`} replace />;

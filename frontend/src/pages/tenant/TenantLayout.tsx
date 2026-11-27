@@ -2,17 +2,23 @@ import { Banknote, BadgeCheck, Boxes, Briefcase, Building2, Calculator, Calendar
 import { Navigate, Outlet, useLocation, useParams } from "react-router-dom";
 import { PageLoader } from "../../components/brand/Brand";
 import { AppShell, type NavGroup } from "../../components/layout/AppShell";
+import { PharmacyNotFound, SystemNotFound } from "../../components/NotFound";
+import { ApiError } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
 import { brandOf, useSiteQuery } from "../../lib/site";
 import { MODULE_ACCESS, allowed, type Module } from "./access";
 
 /** Staff area, in the pharmacy's own brand. Modules a role cannot use are not listed, and their addresses redirect away. */
 export default function TenantLayout() {
-  const { slug = "" } = useParams();
+  const params = useParams();
+  const slug = params.slug ?? "";
+  const unknown = params["*"] !== undefined; // only the catch-all route sets this
   const { pathname, search } = useLocation();
   const { user, loading } = useAuth();
   const site = useSiteQuery(slug);
   if (loading || site.isLoading) return <PageLoader label="Opening your workspace…" brand={brandOf(site.data)} />;
+  if (site.error instanceof ApiError && site.error.status === 404) return <SystemNotFound />;
+  if (unknown && (!user || user.tenant_slug !== slug || user.role === "customer")) return <PharmacyNotFound />;
   if (!user || user.is_platform_admin || user.tenant_slug !== slug) return <Navigate to={`/${slug}/login`} replace />;
   if (user.role === "customer") return <Navigate to={`/${slug}/account/dashboard`} replace />;
   if (user.must_change_password) return <Navigate to="/change-password" replace state={{ slug }} />;

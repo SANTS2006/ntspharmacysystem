@@ -29,7 +29,7 @@ def env(two_pharmacies):
     with tenant_context(g):
         main = Branch.objects.get(code="MAIN")
         second = Branch.objects.create(name="Second", code="B2")
-        cat = Category.objects.get(name="Antibiotics")
+        cat, _ = Category.objects.get_or_create(name="Antibiotics")
         med = Medicine.objects.create(name="Amoxicillin 500mg", category=cat, barcode="1234567890", sku="AMX500", reorder_level=20, purchase_cost=0) if False else Medicine.objects.create(name="Amoxicillin 500mg", category=cat, barcode="1234567890", sku="AMX500", reorder_level=20, purchase_price=1, selling_price=2)
     officer = User.objects.create_user("io@green.test", PW, tenant=g, full_name="IO", role=g.roles.get(code="inventory_officer"), branch=main)
     cashier = User.objects.create_user("c@green.test", PW, tenant=g, full_name="C", role=g.roles.get(code="cashier"), branch=main)
@@ -59,18 +59,16 @@ def stock(e, branch=None):
 
 
 # ---------------- catalogue ----------------
-def test_default_categories_seeded_and_custom_rules(env):
+def test_new_pharmacies_have_no_built_in_categories_and_manage_their_own(env):
     c = env["admin_g"]
-    names = [x["name"] for x in c.get("/api/v1/categories/").data]
-    assert len(names) == 14 and "Antimalarials" in names
+    assert [x["name"] for x in c.get("/api/v1/categories/").data] == ["Antibiotics"]  # only the one this test setup created
+    assert env["admin_b"].get("/api/v1/categories/").data == []
     r = c.post("/api/v1/categories/", {"name": "Herbal"}, format="json")
-    assert r.status_code == 201 and r.data["is_system"] is False
+    assert r.status_code == 201 and set(r.data) == {"id", "name"}
     assert c.post("/api/v1/categories/", {"name": "herbal"}, format="json").status_code == 400
-    sys_id = Category.all_objects.get(tenant=env["g"], name="Antibiotics").pk
-    assert c.patch(f"/api/v1/categories/{sys_id}/", {"name": "X"}, format="json").status_code == 400
-    assert c.delete(f"/api/v1/categories/{sys_id}/").status_code == 400
+    assert c.patch(f"/api/v1/categories/{r.data['id']}/", {"name": "Herbals"}, format="json").status_code == 200
+    assert c.delete(f"/api/v1/categories/{env['cat'].pk}/").status_code == 400  # in use by a medicine
     assert c.delete(f"/api/v1/categories/{r.data['id']}/").status_code == 204
-    assert Category.all_objects.filter(tenant=env["b"]).count() == 14
 
 
 def test_medicine_validation_rules(env):
@@ -82,10 +80,10 @@ def test_medicine_validation_rules(env):
     assert c.post("/api/v1/medicines/", {"name": "X", "category": cat, "barcode": "12"}, format="json").status_code == 400  # bad barcode
     assert c.post("/api/v1/medicines/", {"name": "Dup", "category": cat, "barcode": "1234567890"}, format="json").status_code == 400
     assert c.post("/api/v1/medicines/", {"name": "N", "category": cat, "selling_price": "-1"}, format="json").status_code == 400
-    other_cat = Category.all_objects.filter(tenant=env["b"]).first().pk
+    other_cat = Category.all_objects.create(tenant=env["b"], name="Antibiotics").pk
     assert c.post("/api/v1/medicines/", {"name": "Y", "category": other_cat}, format="json").status_code == 400  # other tenant's category
     # same barcode is fine in another pharmacy
-    bc = Category.all_objects.filter(tenant=env["b"]).first().pk
+    bc = other_cat
     assert env["admin_b"].post("/api/v1/medicines/", {"name": "Z", "category": bc, "barcode": "1234567890"}, format="json").status_code == 201
 
 
